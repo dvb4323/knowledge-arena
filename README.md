@@ -1,5 +1,5 @@
 # knowledge-arena
-This is a repository\n
+This is a repository
 <h3>How to run the program</h3>
 <ls>
   <li>Compile the server program using: gcc server.c -o server -lpthread</li>
