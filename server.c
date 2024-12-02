@@ -10,7 +10,8 @@
 #define MAX_CLIENTS 100
 #define CREDENTIALS_FILE "users.txt"
 
-typedef struct {
+typedef struct
+{
     int socket;
     char username[50];
     bool logged_in;
@@ -20,15 +21,19 @@ Client clients[MAX_CLIENTS];
 int client_count = 0;
 pthread_mutex_t lock;
 
-bool user_exists(const char *username) {
+bool user_exists(const char *username)
+{
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (!file) return false;
+    if (!file)
+        return false;
 
     char line[100];
-    while (fgets(line, sizeof(line), file)) {
+    while (fgets(line, sizeof(line), file))
+    {
         char stored_username[50];
         sscanf(line, "%s", stored_username);
-        if (strcmp(username, stored_username) == 0) {
+        if (strcmp(username, stored_username) == 0)
+        {
             fclose(file);
             return true;
         }
@@ -38,15 +43,18 @@ bool user_exists(const char *username) {
     return false;
 }
 
-bool register_user(const char *username, const char *password) {
+bool register_user(const char *username, const char *password)
+{
     pthread_mutex_lock(&lock);
-    if (user_exists(username)) {
+    if (user_exists(username))
+    {
         pthread_mutex_unlock(&lock);
         return false;
     }
 
     FILE *file = fopen(CREDENTIALS_FILE, "a");
-    if (!file) {
+    if (!file)
+    {
         pthread_mutex_unlock(&lock);
         return false;
     }
@@ -57,14 +65,18 @@ bool register_user(const char *username, const char *password) {
     return true;
 }
 
-bool authenticate_user(const char *username, const char *password) {
+bool authenticate_user(const char *username, const char *password)
+{
     FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (!file) return false;
+    if (!file)
+        return false;
 
     char line[100], stored_username[50], stored_password[50];
-    while (fgets(line, sizeof(line), file)) {
+    while (fgets(line, sizeof(line), file))
+    {
         sscanf(line, "%s %s", stored_username, stored_password);
-        if (strcmp(username, stored_username) == 0 && strcmp(password, stored_password) == 0) {
+        if (strcmp(username, stored_username) == 0 && strcmp(password, stored_password) == 0)
+        {
             fclose(file);
             return true;
         }
@@ -74,51 +86,82 @@ bool authenticate_user(const char *username, const char *password) {
     return false;
 }
 
-void *handle_client(void *arg) {
+void *handle_client(void *arg)
+{
     int sock = *(int *)arg;
     char buffer[1024];
     char username[50] = {0};
     bool logged_in = false;
 
-    while (recv(sock, buffer, 1024, 0) > 0) {
+    while (recv(sock, buffer, 1024, 0) > 0)
+    {
         buffer[strcspn(buffer, "\n")] = '\0';
+
+        // Log received message
+        printf("Received from client (%d): %s\n", sock, buffer);
+
         char command[20], arg1[50], arg2[50];
         sscanf(buffer, "%s %s %s", command, arg1, arg2);
 
-        if (strcmp(command, "REGISTER") == 0) {
-            if (register_user(arg1, arg2)) {
+        if (strcmp(command, "REGISTER") == 0)
+        {
+            if (register_user(arg1, arg2))
+            {
+                printf("Client (%d): User '%s' registered successfully.\n", sock, arg1);
                 send(sock, "Registration successful\n", 24, 0);
-            } else {
+            }
+            else
+            {
+                printf("Client (%d): Failed to register user '%s' (already exists).\n", sock, arg1);
                 send(sock, "Registration failed: User already exists\n", 41, 0);
             }
-        } else if (strcmp(command, "LOGIN") == 0) {
-            if (authenticate_user(arg1, arg2)) {
+        }
+        else if (strcmp(command, "LOGIN") == 0)
+        {
+            if (authenticate_user(arg1, arg2))
+            {
                 logged_in = true;
                 strcpy(username, arg1);
+                printf("Client (%d): User '%s' logged in successfully.\n", sock, arg1);
                 send(sock, "Login successful\n", 18, 0);
-            } else {
+            }
+            else
+            {
+                printf("Client (%d): Login failed for user '%s' (invalid credentials).\n", sock, arg1);
                 send(sock, "Login failed: Invalid credentials\n", 34, 0);
             }
-        } else if (strcmp(command, "LOGOUT") == 0) {
-            if (logged_in) {
+        }
+        else if (strcmp(command, "LOGOUT") == 0)
+        {
+            if (logged_in)
+            {
+                printf("Client (%d): User '%s' logged out successfully.\n", sock, username);
                 logged_in = false;
                 memset(username, 0, sizeof(username));
                 send(sock, "Logout successful\n", 19, 0);
-            } else {
+            }
+            else
+            {
+                printf("Client (%d): Logout attempt failed (not logged in).\n", sock);
                 send(sock, "Logout failed: Not logged in\n", 30, 0);
             }
-        } else {
+        }
+        else
+        {
+            printf("Client (%d): Unknown command received: %s\n", sock, command);
             send(sock, "Unknown command\n", 17, 0);
         }
 
         memset(buffer, 0, sizeof(buffer));
     }
 
+    printf("Client (%d) disconnected.\n", sock);
     close(sock);
     return NULL;
 }
 
-int main() {
+int main()
+{
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -126,7 +169,8 @@ int main() {
     pthread_mutex_init(&lock, NULL);
 
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket == -1) {
+    if (server_socket == -1)
+    {
         perror("Socket creation failed");
         exit(EXIT_FAILURE);
     }
@@ -135,7 +179,8 @@ int main() {
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(PORT);
 
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    {
         perror("Bind failed");
         close(server_socket);
         exit(EXIT_FAILURE);
@@ -144,7 +189,8 @@ int main() {
     listen(server_socket, MAX_CLIENTS);
     printf("Server listening on port %d\n", PORT);
 
-    while ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len))) {
+    while ((client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len)))
+    {
         pthread_t thread;
         pthread_create(&thread, NULL, handle_client, (void *)&client_socket);
     }
