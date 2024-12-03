@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <stdbool.h>
 #include "logic.h"
 #include "cJSON.h"
 
@@ -24,7 +25,8 @@ int player_count = 0;
 pthread_mutex_t clients_lock = PTHREAD_MUTEX_INITIALIZER; // Mutex to protect player data
 pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t command_cond = PTHREAD_COND_INITIALIZER;
-int start_game_flag = 0; // Flag to indicate when START_GAME is triggered
+int start_game_flag = 0;  // Flag to indicate when START_GAME is triggered
+int question_counter = 0; // Counter for generating unique question IDs
 
 void broadcast(const char *message)
 {
@@ -39,12 +41,30 @@ void broadcast(const char *message)
     pthread_mutex_unlock(&clients_lock);
 }
 
+void send_start_game_message()
+{
+    cJSON *start_message = cJSON_CreateObject();
+    cJSON_AddStringToObject(start_message, "type", "Start_Game");
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "message", "Tro choi bat dau");
+    cJSON_AddItemToObject(start_message, "data", data);
+
+    char *start_str = cJSON_PrintUnformatted(start_message);
+
+    broadcast(start_str);
+
+    free(start_str);
+    cJSON_Delete(start_message);
+}
+
 void send_question()
 {
     cJSON *question = cJSON_CreateObject();
     cJSON_AddStringToObject(question, "type", "Question");
 
     cJSON *data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(data, "questionID", 1);
     cJSON_AddStringToObject(data, "question", "Dap an cua 2 + 2 la bao nhieu?");
     cJSON *options = cJSON_CreateArray();
     cJSON_AddItemToArray(options, cJSON_CreateString("1"));
@@ -56,15 +76,8 @@ void send_question()
 
     char *question_str = cJSON_PrintUnformatted(question);
 
-    pthread_mutex_lock(&clients_lock);
-    for (int i = 0; i < player_count; i++)
-    {
-        if (players[i].logged_in)
-        {
-            send(players[i].socket, question_str, strlen(question_str), 0);
-        }
-    }
-    pthread_mutex_unlock(&clients_lock);
+    // Broadcast to all players
+    broadcast(question_str);
 
     free(question_str);
     cJSON_Delete(question);
@@ -76,45 +89,41 @@ void *game_controller(void *arg)
     {
         pthread_mutex_lock(&command_lock);
 
-        // Wait until `start_game_flag` is set
+        // Wait for any command signal
         while (start_game_flag == 0)
         {
             pthread_cond_wait(&command_cond, &command_lock);
         }
 
-        // Reset the flag
-        start_game_flag = 0;
+        int command_flag = start_game_flag; // Capture the flag value
+        start_game_flag = 0;                // Reset the flag
 
         pthread_mutex_unlock(&command_lock);
 
-        // Broadcast START_GAME message to all players
-        cJSON *start_message = cJSON_CreateObject();
-        cJSON_AddStringToObject(start_message, "type", "Start_Game");
-
-        cJSON *data = cJSON_CreateObject();
-        cJSON_AddStringToObject(data, "message", "Tro choi bat dau");
-        cJSON_AddItemToObject(start_message, "data", data);
-
-        char *start_str = cJSON_PrintUnformatted(start_message);
-
-        // Send to all connected players
-        pthread_mutex_lock(&clients_lock);
-        for (int i = 0; i < player_count; i++)
+        if (command_flag == 1) // Start_Game message
         {
-            if (players[i].logged_in)
-            {
-                send(players[i].socket, start_str, strlen(start_str), 0);
-            }
+            cJSON *start_message = cJSON_CreateObject();
+            cJSON_AddStringToObject(start_message, "type", "Start_Game");
+
+            cJSON *data = cJSON_CreateObject();
+            cJSON_AddStringToObject(data, "message", "Tro choi bat dau");
+            cJSON_AddItemToObject(start_message, "data", data);
+
+            char *start_str = cJSON_PrintUnformatted(start_message);
+
+            // Broadcast to all players
+            broadcast(start_str);
+
+            free(start_str);
+            cJSON_Delete(start_message);
+
+            printf("Game started and message broadcasted.\n");
         }
-        pthread_mutex_unlock(&clients_lock);
-
-        free(start_str);
-        cJSON_Delete(start_message);
-
-        printf("Game started and message broadcasted.\n");
-
-        // Add additional game logic here if needed (e.g., sending questions)
-        send_question();
+        else if (command_flag == 2) // Send question
+        {
+            send_question();
+            printf("Question broadcasted.\n");
+        }
     }
     return NULL;
 }
@@ -124,18 +133,21 @@ void *read_server_input(void *arg)
     while (1)
     {
         char command[20];
-        // printf("Nhap lenh: ");
-        fgets(command, 20, stdin);
+        fgets(command, sizeof(command), stdin);
         command[strcspn(command, "\n")] = '\0'; // Remove trailing newline
 
         if (strcmp(command, "START_GAME") == 0)
         {
             pthread_mutex_lock(&command_lock);
-
-            // Set the flag and signal the game_controller thread
-            start_game_flag = 1;
+            start_game_flag = 1; // Set the flag for broadcasting the start message
             pthread_cond_signal(&command_cond);
-
+            pthread_mutex_unlock(&command_lock);
+        }
+        else if (strcmp(command, "1") == 0) // Send the question when input is '1'
+        {
+            pthread_mutex_lock(&command_lock);
+            start_game_flag = 2; // Use a different flag to indicate sending a question
+            pthread_cond_signal(&command_cond);
             pthread_mutex_unlock(&command_lock);
         }
         else
@@ -156,7 +168,6 @@ void *handle_client(void *arg)
     {
         printf("Received from client (%d): %s\n", sock, buffer);
 
-        // Parse JSON request
         cJSON *request = cJSON_Parse(buffer);
         if (!request)
         {
@@ -164,11 +175,9 @@ void *handle_client(void *arg)
             continue;
         }
 
-        // Extract type and data
         const char *type = cJSON_GetObjectItem(request, "type")->valuestring;
         cJSON *data = cJSON_GetObjectItem(request, "data");
 
-        // Prepare response JSON
         cJSON *response = cJSON_CreateObject();
         cJSON_AddStringToObject(response, "type", type);
 
@@ -248,49 +257,15 @@ void *handle_client(void *arg)
                 cJSON_AddStringToObject(response, "message", "Not logged in");
             }
         }
-        else if (strcmp(type, "Answer") == 0)
-        {
-            const char *username = cJSON_GetObjectItem(data, "username")->valuestring;
-            const char *answer = cJSON_GetObjectItem(data, "answer")->valuestring;
-
-            bool correct = strcmp(answer, "4") == 0;
-
-            pthread_mutex_lock(&clients_lock);
-            for (int i = 0; i < player_count; i++)
-            {
-                if (strcmp(players[i].username, username) == 0)
-                {
-                    if (correct)
-                    {
-                        players[i].score++;
-                    }
-                    break;
-                }
-            }
-            pthread_mutex_unlock(&clients_lock);
-
-            cJSON *response_data = cJSON_CreateObject();
-            cJSON_AddBoolToObject(response_data, "correct", correct);
-            cJSON_AddStringToObject(response_data, "message", correct ? "Ban tra loi dung!" : "Ban tra loi sai!");
-
-            cJSON_AddItemToObject(response, "data", response_data);
-            char *response_str = cJSON_PrintUnformatted(response);
-            send(sock, response_str, strlen(response_str), 0);
-
-            free(response_str);
-            cJSON_Delete(response);
-        }
         else
         {
             cJSON_AddStringToObject(response, "status", "failed");
             cJSON_AddStringToObject(response, "message", "Unknown command");
         }
 
-        // Send JSON response to client
         char *response_string = cJSON_PrintUnformatted(response);
         send(sock, response_string, strlen(response_string), 0);
 
-        // Cleanup
         free(response_string);
         cJSON_Delete(response);
         cJSON_Delete(request);
@@ -329,11 +304,9 @@ int main()
     listen(server_socket, MAX_CLIENTS);
     printf("Server listening on port %d\n", PORT);
 
-    // Start the input reading thread
     pthread_t input_thread;
     pthread_create(&input_thread, NULL, read_server_input, NULL);
 
-    // Start the game controller thread
     pthread_t game_thread;
     pthread_create(&game_thread, NULL, game_controller, NULL);
 
