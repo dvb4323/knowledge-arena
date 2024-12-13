@@ -60,6 +60,44 @@ void send_start_game_message()
     cJSON_Delete(start_message);
 }
 
+void broadcast_question(int question_id)
+{
+    cJSON *original_question = get_question_by_id(question_id);
+    if (!original_question)
+    {
+        printf("Question with ID %d not found.\n", question_id);
+        return;
+    }
+
+    // Create a custom JSON object for broadcasting
+    cJSON *broadcast_message = cJSON_CreateObject();
+    cJSON_AddStringToObject(broadcast_message, "type", "Question_Broadcast");
+
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddNumberToObject(data, "question_id", question_id);
+
+    cJSON *question_text = cJSON_GetObjectItem(original_question, "question");
+    if (question_text && cJSON_IsString(question_text))
+    {
+        cJSON_AddStringToObject(data, "question_text", question_text->valuestring);
+    }
+
+    cJSON *options = cJSON_GetObjectItem(original_question, "options");
+    if (options && cJSON_IsArray(options))
+    {
+        cJSON_AddItemToObject(data, "options", cJSON_Duplicate(options, 1)); // Deep copy the options array
+    }
+
+    cJSON_AddItemToObject(broadcast_message, "data", data);
+
+    // Convert to string and broadcast
+    char *message_str = cJSON_PrintUnformatted(broadcast_message);
+    broadcast(message_str); // Use the existing `broadcast` function to send to all clients
+
+    free(message_str);
+    cJSON_Delete(broadcast_message);
+}
+
 void *game_controller(void *arg)
 {
     while (1)
@@ -122,27 +160,8 @@ void *read_server_input(void *arg)
         else if (isdigit(command[0])) // Validate command is a number (question ID)
         {
             int question_id = atoi(command);
-            cJSON *question = get_question_by_id(question_id);
-
-            if (question)
-            {
-                char *question_str = cJSON_PrintUnformatted(question);
-                if (question_str)
-                {
-                    broadcast(question_str); // Broadcast the question
-                    free(question_str);      // Free the string allocated by cJSON_PrintUnformatted
-                }
-                else
-                {
-                    printf("Failed to serialize question ID %d.\n", question_id);
-                }
-                cJSON_Delete(question); // Free memory allocated by get_question_by_id
-                printf("Broadcasted question ID %d\n", question_id);
-            }
-            else
-            {
-                printf("Question with ID %d not found.\n", question_id);
-            }
+            broadcast_question(question_id); // Use the `broadcast_question` function
+            printf("Broadcasted question ID %d\n", question_id);
         }
         else
         {
