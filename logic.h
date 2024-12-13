@@ -2,6 +2,7 @@
 #define LOGIC_H
 
 #include <stdbool.h>
+#include "cJSON.h"
 
 #define CREDENTIALS_FILE "users.txt"
 
@@ -13,5 +14,20 @@ bool register_user(const char *username, const char *password);
 
 // Xác thực thông tin đăng nhập
 bool authenticate_user(const char *username, const char *password);
+
+// Score-related functions
+bool update_score(const char *username, int score_delta);
+
+// Other utility functions
+typedef struct
+{
+    int id;
+    char question[256];
+    char options[4][100];
+    char answer[100];
+} Question;
+// Question-related functions
+bool load_questions();
+cJSON *get_question_by_id(int question_id);
 
 #endif // LOGIC_H
