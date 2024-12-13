@@ -5,6 +5,8 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 #include <stdbool.h>
+#include <sys/socket.h>
+#include <ctype.h>
 #include "logic.h"
 #include "cJSON.h"
 
@@ -58,31 +60,6 @@ void send_start_game_message()
     cJSON_Delete(start_message);
 }
 
-void send_question()
-{
-    cJSON *question = cJSON_CreateObject();
-    cJSON_AddStringToObject(question, "type", "Question");
-
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddNumberToObject(data, "questionID", 1);
-    cJSON_AddStringToObject(data, "question", "Dap an cua 2 + 2 la bao nhieu?");
-    cJSON *options = cJSON_CreateArray();
-    cJSON_AddItemToArray(options, cJSON_CreateString("1"));
-    cJSON_AddItemToArray(options, cJSON_CreateString("2"));
-    cJSON_AddItemToArray(options, cJSON_CreateString("4"));
-    cJSON_AddItemToArray(options, cJSON_CreateString("8"));
-    cJSON_AddItemToObject(data, "options", options);
-    cJSON_AddItemToObject(question, "data", data);
-
-    char *question_str = cJSON_PrintUnformatted(question);
-
-    // Broadcast to all players
-    broadcast(question_str);
-
-    free(question_str);
-    cJSON_Delete(question);
-}
-
 void *game_controller(void *arg)
 {
     while (1)
@@ -121,7 +98,6 @@ void *game_controller(void *arg)
         }
         else if (command_flag == 2) // Send question
         {
-            send_question();
             printf("Question broadcasted.\n");
         }
     }
@@ -143,12 +119,30 @@ void *read_server_input(void *arg)
             pthread_cond_signal(&command_cond);
             pthread_mutex_unlock(&command_lock);
         }
-        else if (strcmp(command, "1") == 0) // Send the question when input is '1'
+        else if (isdigit(command[0])) // Validate command is a number (question ID)
         {
-            pthread_mutex_lock(&command_lock);
-            start_game_flag = 2; // Use a different flag to indicate sending a question
-            pthread_cond_signal(&command_cond);
-            pthread_mutex_unlock(&command_lock);
+            int question_id = atoi(command);
+            cJSON *question = get_question_by_id(question_id);
+
+            if (question)
+            {
+                char *question_str = cJSON_PrintUnformatted(question);
+                if (question_str)
+                {
+                    broadcast(question_str); // Broadcast the question
+                    free(question_str);      // Free the string allocated by cJSON_PrintUnformatted
+                }
+                else
+                {
+                    printf("Failed to serialize question ID %d.\n", question_id);
+                }
+                cJSON_Delete(question); // Free memory allocated by get_question_by_id
+                printf("Broadcasted question ID %d\n", question_id);
+            }
+            else
+            {
+                printf("Question with ID %d not found.\n", question_id);
+            }
         }
         else
         {
@@ -229,15 +223,17 @@ void *handle_client(void *arg)
             if (logged_in)
             {
                 logged_in = false;
+                char temp_username[50];
+                strcpy(temp_username, username); // Preserve username for lookup
                 memset(username, 0, sizeof(username));
 
                 // Remove player from active players
                 pthread_mutex_lock(&clients_lock);
                 for (int i = 0; i < player_count; i++)
                 {
-                    if (strcmp(players[i].username, username) == 0)
+                    if (strcmp(players[i].username, temp_username) == 0)
                     {
-                        // Shift players
+                        // Shift players to maintain order
                         for (int j = i; j < player_count - 1; j++)
                         {
                             players[j] = players[j + 1];
@@ -257,6 +253,7 @@ void *handle_client(void *arg)
                 cJSON_AddStringToObject(response, "message", "Not logged in");
             }
         }
+
         else
         {
             cJSON_AddStringToObject(response, "status", "failed");
@@ -279,6 +276,12 @@ void *handle_client(void *arg)
 
 int main()
 {
+    if (!load_questions())
+    {
+        fprintf(stderr, "Failed to load questions. Exiting...\n");
+        exit(EXIT_FAILURE);
+    }
+
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
