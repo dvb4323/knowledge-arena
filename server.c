@@ -189,6 +189,13 @@ void *handle_client(void *arg)
         }
 
         const char *type = cJSON_GetObjectItem(request, "type")->valuestring;
+        if (strcmp(type, "Answer_Response") == 0)
+        {
+            cJSON *data = cJSON_GetObjectItem(request, "data");
+            handle_answer_response(data);
+        }
+
+        const char *type = cJSON_GetObjectItem(request, "type")->valuestring;
         cJSON *data = cJSON_GetObjectItem(request, "data");
 
         cJSON *response = cJSON_CreateObject();
