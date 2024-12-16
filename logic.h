@@ -41,7 +41,6 @@ typedef struct Player
 bool load_questions();
 cJSON *get_question_by_id(int question_id);
  
-void process_answer(int sock, int question_id, int selected_option, int player_id, int *client_sockets, int client_count);
+void process_answer(int sock, int question_id, int selected_option, int player_id, Player *players, int player_count);
  
 #endif // LOGIC_H
- 
