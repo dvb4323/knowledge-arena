@@ -214,15 +214,22 @@ void *handle_client(void *arg)
                 logged_in = true;
                 strcpy(username, login_username);
  
+                // Assign a unique player ID
+                player_id = next_player_id++;
                 pthread_mutex_lock(&clients_lock);
                 players[player_count].socket = sock;
+                players[player_count].player_id = player_id;
                 strcpy(players[player_count].username, username);
                 players[player_count].logged_in = true;
                 players[player_count].score = 0;
                 player_count++;
                 pthread_mutex_unlock(&clients_lock);
  
+                // Sending Response
+                char player_id_str[10];
+                snprintf(player_id_str, sizeof(player_id_str), "%d", player_id);
                 cJSON_AddStringToObject(response, "status", "success");
+                cJSON_AddStringToObject(response, "player_id", player_id_str);
                 cJSON_AddStringToObject(response, "message", "Login successful");
             }
             else
@@ -271,7 +278,7 @@ void *handle_client(void *arg)
                 int question_id = cJSON_GetObjectItem(data, "question_id")->valueint;
                 int selected_option = cJSON_GetObjectItem(data, "answer")->valueint;
  
-                process_answer(sock, question_id, selected_option, username, players, player_count);
+                process_answer(sock, question_id, selected_option, player_id, players, player_count);
                 cJSON_AddStringToObject(response, "status", "success");
                 cJSON_AddStringToObject(response, "message", "Answer processed");
             }
