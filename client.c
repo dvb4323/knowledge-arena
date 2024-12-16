@@ -56,6 +56,8 @@ void *listen_to_server(void *arg)
 {
     int sock = *(int *)arg;
     char buffer[1024];
+    int player_id = -1;
+    int current_question_id = -1; // Track the current question ID
  
     while (1)
     {
@@ -70,15 +72,26 @@ void *listen_to_server(void *arg)
             cJSON *message = cJSON_Parse(buffer);
             const char *type = cJSON_GetObjectItem(message, "type")->valuestring;
  
-            if (strcmp(type, "Question_Broadcast") == 0)
+            if (strcmp(type, "Login_Response") == 0)
+            {
+                // Handle login response
+                const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
+                if (strcmp(status, "success") == 0)
+                {
+                    player_id = cJSON_GetObjectItem(message, "player_id")->valueint;
+                    printf("Login successful. Player ID: %d\n", player_id);
+                }
+            }
+ 
+            else if (strcmp(type, "Question_Broadcast") == 0)
             {
                 // Handle question broadcast
                 cJSON *data = cJSON_GetObjectItem(message, "data");
-                int question_id = cJSON_GetObjectItem(data, "question_id")->valueint;
+                current_question_id = cJSON_GetObjectItem(data, "question_id")->valueint;
                 const char *question_text = cJSON_GetObjectItem(data, "question_text")->valuestring;
                 cJSON *options = cJSON_GetObjectItem(data, "options");
  
-                printf("Question ID: %d\n", question_id);
+                printf("Question ID: %d\n", current_question_id);
                 printf("Question: %s\n", question_text);
                 for (int i = 0; i < cJSON_GetArraySize(options); i++)
                 {
@@ -91,7 +104,11 @@ void *listen_to_server(void *arg)
                 scanf("%d", &answer);
  
                 // Send answer to server
-                send_answer(sock, 1, question_id, answer); // Replace '1' with the actual player ID
+                send_answer(sock, player_id, current_question_id, answer); // Replace '1' with the actual player ID
+                current_question_id = -1;                                  // Reset the question ID
+            }
+            else
+            {
             }
  
             cJSON_Delete(message);
@@ -116,6 +133,7 @@ int main()
     struct sockaddr_in server_addr;
     char command[20], username[50], password[50];
     pthread_t listener_thread;
+    int waiting_for_question = 0;
  
     // Create socket
     sock = socket(AF_INET, SOCK_STREAM, 0);
