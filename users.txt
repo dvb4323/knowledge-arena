@@ -1,7 +1,6 @@
-user1 password1
-user2 password2
-user3 password2
-user5 pass5
-user6 password6
-user7 p7
-user8 pass8
+abcd 123456
+abcde 1234
+abcdef 1234
+ABCDEGH 123
+ABC 123
+123 123
