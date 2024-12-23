@@ -10,7 +10,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8081
+#define PORT 8080
 #define MAX_CLIENTS 100
 
 Player players[MAX_CLIENTS];
@@ -28,7 +28,7 @@ void broadcast(const char *message)
     pthread_mutex_lock(&clients_lock);
     for (int i = 0; i < player_count; i++)
     {
-        if (players[i].logged_in)
+        if (players[i].logged_in) // Chỉ gửi thông báo đến người chơi đang hoạt động
         {
             send(players[i].socket, message, strlen(message), 0);
         }
@@ -273,33 +273,37 @@ void *handle_client(void *arg)
         {
             if (logged_in)
             {
-                cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
-                cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
-                cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
+        cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
+        cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
+        cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
 
-                if (player_id_item && cJSON_IsNumber(player_id_item) &&
-                    question_id_item && cJSON_IsNumber(question_id_item) &&
-                    answer_item && cJSON_IsNumber(answer_item))
-                {
-                    int player_id = player_id_item->valueint;
-                    int question_id = question_id_item->valueint;
-                    int selected_option = answer_item->valueint;
+        if (player_id_item && cJSON_IsNumber(player_id_item) &&
+            question_id_item && cJSON_IsNumber(question_id_item) &&
+            answer_item && cJSON_IsNumber(answer_item))
+        {
+            int player_id = player_id_item->valueint;
+            int question_id = question_id_item->valueint;
+            int selected_option = answer_item->valueint;
 
-                    process_answer(sock, question_id, selected_option, player_id, players, player_count);
-                    // cJSON_AddStringToObject(response, "status", "success");
-                    // cJSON_AddStringToObject(response, "message", "Answer processed");
-                }
-                else
-                {
-                    cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Invalid player ID, question ID, or answer");
-                }
-            }
-            else
+            process_answer(sock, question_id, selected_option, player_id, players, player_count);
+
+            // Nếu người chơi bị loại
+            if (!players[player_id - 1].logged_in)
             {
-                cJSON_AddStringToObject(response, "status", "failed");
-                cJSON_AddStringToObject(response, "message", "Not logged in");
+                logged_in = false; // Đánh dấu client không còn hoạt động
             }
+        }
+        else
+        {
+            cJSON_AddStringToObject(response, "status", "failed");
+            cJSON_AddStringToObject(response, "message", "Invalid player ID, question ID, or answer");
+        }
+    }
+    else
+    {
+        cJSON_AddStringToObject(response, "status", "failed");
+        cJSON_AddStringToObject(response, "message", "Not logged in");
+    }
         }
         else
         {
@@ -318,12 +322,14 @@ void *handle_client(void *arg)
 
     // Cleanup on disconnect
     if (logged_in)
+     printf("[LOG] Client (%d) disconnected or sent empty data.\n", sock);
     {
         pthread_mutex_lock(&clients_lock);
         for (int i = 0; i < player_count; i++)
         {
             if (players[i].socket == sock)
             {
+                printf("[LOG] Client (%d) disconnected or sent empty data.\n", sock);
                 for (int j = i; j < player_count - 1; j++)
                 {
                     players[j] = players[j + 1];
@@ -335,9 +341,9 @@ void *handle_client(void *arg)
         pthread_mutex_unlock(&clients_lock);
     }
 
-    printf("Client (%d) disconnected.\n", sock);
-    close(sock);
-    return NULL;
+printf("Client (%d) disconnected.\n", sock);
+close(sock);
+return NULL;
 }
 
 int main()
