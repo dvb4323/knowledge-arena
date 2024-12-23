@@ -158,12 +158,49 @@ bool validate_answer(int question_id, int selected_option)
     if (!question)
         return false;
 
-    cJSON *correct_option = cJSON_GetObjectItem(question, "correct_option");
-    bool is_correct = correct_option && correct_option->valueint == selected_option;
+    // Lấy danh sách options
+    cJSON *options = cJSON_GetObjectItem(question, "options");
+    if (!options || !cJSON_IsArray(options))
+    {
+        printf("Invalid or missing options for question ID %d\n", question_id);
+        cJSON_Delete(question);
+        return false;
+    }
 
-    cJSON_Delete(question); // Free memory of the duplicated question
+    // Lấy correct_option
+    cJSON *correct_option = cJSON_GetObjectItem(question, "correct_option");
+    if (!correct_option || !cJSON_IsString(correct_option))
+    {
+        printf("Invalid or missing correct_option for question ID %d\n", question_id);
+        cJSON_Delete(question);
+        return false;
+    }
+
+    // Kiểm tra selected_option có hợp lệ
+    int options_size = cJSON_GetArraySize(options);
+    if (selected_option < 1 || selected_option > options_size)
+    {
+        printf("Selected option %d is out of range for question ID %d\n", selected_option, question_id);
+        cJSON_Delete(question);
+        return false;
+    }
+
+    // Lấy chuỗi tương ứng với selected_option
+    cJSON *selected_option_value = cJSON_GetArrayItem(options, selected_option - 1);
+    if (!selected_option_value || !cJSON_IsString(selected_option_value))
+    {
+        printf("Invalid selected option %d for question ID %d\n", selected_option, question_id);
+        cJSON_Delete(question);
+        return false;
+    }
+
+    // So sánh selected_option với correct_option
+    bool is_correct = strcmp(selected_option_value->valuestring, correct_option->valuestring) == 0;
+
+    cJSON_Delete(question); // Giải phóng bộ nhớ
     return is_correct;
 }
+
 
 // Process a client's answer and broadcast the result
 void process_answer(int sock, int question_id, int selected_option, int player_id, Player *players, int player_count)
@@ -181,7 +218,6 @@ void process_answer(int sock, int question_id, int selected_option, int player_i
 
     if (!current_player)
     {
-        // Handle error: player not found
         char error_response[256];
         snprintf(error_response, sizeof(error_response),
                  "{\"type\":\"Answer_Response\",\"status\":\"failed\",\"message\":\"Player not found\"}");
@@ -189,34 +225,29 @@ void process_answer(int sock, int question_id, int selected_option, int player_i
         return;
     }
 
-    // Process the answer (you'll need logic to check the correct answer)
-    cJSON *question_data = get_question_by_id(question_id);
-    if (!question_data)
+    // Kiểm tra câu trả lời
+    if (validate_answer(question_id, selected_option))
     {
-        char error_response[256];
-        snprintf(error_response, sizeof(error_response),
-                 "{\"type\":\"Answer_Response\",\"status\":\"failed\",\"message\":\"Invalid question ID\"}");
-        send(sock, error_response, strlen(error_response), 0);
-        return;
-    }
+        // Nếu trả lời đúng, cộng điểm
+        current_player->score += 10;
 
-    int correct_option = cJSON_GetObjectItem(question_data, "correct_option")->valueint;
-
-    if (selected_option == correct_option)
-    {
-        current_player->score += 10; // Award points for correct answer
+        char response[256];
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"Answer_Response\",\"status\":\"success\",\"message\":\"Correct answer!\",\"score\":%d}",
+                 current_player->score);
+        send(sock, response, strlen(response), 0);
     }
     else
     {
-        current_player->score -= 5; // Deduct points for incorrect answer
+        // Nếu trả lời sai, loại người chơi
+        current_player->logged_in = false;
+
+        char response[256];
+        snprintf(response, sizeof(response),
+                 "{\"type\":\"Answer_Response\",\"status\":\"failed\",\"message\":\"Wrong answer! You are eliminated.\"}");
+        send(sock, response, strlen(response), 0);
     }
 
-    // Send response back to the client
-    char response[256];
-    snprintf(response, sizeof(response),
-             "{\"type\":\"Answer_Response\",\"score\":%d}", current_player->score);
-    send(sock, response, strlen(response), 0);
-
-    // Cleanup question data
-    cJSON_Delete(question_data);
+    // Giải phóng dữ liệu câu hỏi đã sao chép
+    cJSON_Delete(question_id);
 }
