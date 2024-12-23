@@ -8,7 +8,7 @@
 #include "cJSON.h"
 
 #define SERVER_IP "127.0.0.1"
-#define PORT 8081
+#define PORT 8080
 
 int player_id = -1;
 int waiting_for_answer = 0;
@@ -113,14 +113,22 @@ void process_server_message(char *buffer)
         waiting_for_answer = 1;
     }
     else if (strcmp(type, "Answer_Response") == 0)
+{
+    const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
+    const char *message_text = cJSON_GetObjectItem(message, "message")->valuestring;
+    printf("Server response: %s\n", message_text);
+
+    if (strcmp(status, "success") == 0)
     {
-        const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
-        printf("Answer status: %s\n", status);
-        if (strcmp(status, "success") == 0)
-        {
-            waiting_for_answer = 0; // Reset state
-        }
+        waiting_for_answer = 0; // Reset trạng thái
     }
+    else if (strcmp(status, "failed") == 0 && strstr(message_text, "eliminated"))
+    {
+        printf("You have been eliminated from the game.\n");
+        exit(0); // Thoát chương trình nếu bị loại
+    }
+}
+
 
     cJSON_Delete(message);
 }
