@@ -3,18 +3,18 @@
     "id": 1,
     "question": "What is the capital of France?",
     "options": ["Paris", "London", "Berlin", "Rome"],
-    "correct_option": "Paris"
+    "correct_option": 1
   },
   {
     "id": 2,
     "question": "What is 2 + 2?",
     "options": ["3", "4", "5", "6"],
-    "correct_option": "4"
+    "correct_option": 2
   },
   {
     "id": 3,
     "question": "Which programming language is known as the 'Mother of All Languages'?",
     "options": ["C", "Python", "Java", "Assembly"],
-    "correct_option": "C"
+    "correct_option": 1
   }
 ]

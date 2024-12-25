@@ -4,219 +4,236 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <dirent.h>
+#include <sys/stat.h>
 #include "logic.h"
 #include "cJSON.h"
 
-#define QUESTIONS_FILE "questions.json"
+#define BUFFER_SIZE 1024
 
-pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-
+// Static variables for storing data
 static cJSON *questions = NULL;
+static cJSON *players_data = NULL;
 
-// Load questions from the JSON file into memory
-bool load_questions()
+// Read entire file into memory
+char *read_file(const char *filename)
 {
-    FILE *file = fopen(QUESTIONS_FILE, "r");
+    FILE *file = fopen(filename, "r");
     if (!file)
     {
-        perror("Failed to open questions file");
-        return false;
+        perror("Failed to open file");
+        return NULL;
     }
 
     fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
+    long size = ftell(file);
     rewind(file);
 
-    char *buffer = malloc(file_size + 1);
-    if (!buffer)
+    char *data = malloc(size + 1);
+    if (!data)
     {
         fclose(file);
         perror("Failed to allocate memory");
+        return NULL;
+    }
+
+    fread(data, 1, size, file);
+    data[size] = '\0';
+    fclose(file);
+
+    return data;
+}
+
+// Write data into a file
+bool write_file(const char *filename, const char *data)
+{
+    FILE *file = fopen(filename, "w");
+    if (!file)
+    {
+        perror("Failed to open file for writing");
         return false;
     }
 
-    fread(buffer, 1, file_size, file);
+    fwrite(data, 1, strlen(data), file);
     fclose(file);
+    return true;
+}
 
-    questions = cJSON_Parse(buffer);
-    free(buffer);
+// Load questions
+bool load_questions()
+{
+    char *data = read_file(QUESTIONS_FILE);
+    if (!data)
+        return false;
 
-    if (!questions)
+    questions = cJSON_Parse(data);
+    free(data);
+
+    if (!questions || !cJSON_IsArray(questions))
     {
-        perror("Failed to parse questions JSON");
+        fprintf(stderr, "Failed to parse questions JSON\n");
         return false;
     }
 
     return true;
 }
 
-// Retrieve a question by its ID
-cJSON *get_question_by_id(int question_id)
+// Load or initialize players data
+bool load_players()
 {
-    if (question_id < 1 || question_id > 40) // Replace 40 with the actual maximum number of questions
+    char *data = read_file(PLAYERS_FILE);
+    if (data)
     {
-        printf("Invalid question ID: %d\n", question_id);
-        return NULL;
+        players_data = cJSON_Parse(data);
+        free(data);
+
+        if (!players_data || !cJSON_IsArray(players_data))
+        {
+            fprintf(stderr, "Invalid players.json format\n");
+            players_data = cJSON_CreateArray();
+        }
+    }
+    else
+    {
+        players_data = cJSON_CreateArray();
     }
 
-    if (!questions || !cJSON_IsArray(questions))
+    return true;
+}
+
+// Save players data without mutex
+bool save_players()
+{
+    if (!players_data)
     {
-        printf("Questions data is not initialized or is not an array.\n");
-        return NULL;
+        fprintf(stderr, "Players data is not initialized\n");
+        return false;
     }
+
+    char *data = cJSON_Print(players_data);
+    bool result = write_file(PLAYERS_FILE, data);
+    free(data);
+
+    return result;
+}
+
+// Register a new user
+bool register_user(const char *username, const char *password)
+{
+    if (!players_data)
+        players_data = cJSON_CreateArray();
+
+    // Check if username exists
+    cJSON *player = NULL;
+    cJSON_ArrayForEach(player, players_data)
+    {
+        cJSON *name = cJSON_GetObjectItem(player, "username");
+        if (name && strcmp(name->valuestring, username) == 0)
+        {
+            return false; // Username already exists
+        }
+    }
+
+    // Add new player
+    cJSON *new_player = cJSON_CreateObject();
+    cJSON_AddStringToObject(new_player, "username", username);
+    cJSON_AddStringToObject(new_player, "password", password);
+    cJSON_AddNumberToObject(new_player, "score", 0);
+    cJSON_AddBoolToObject(new_player, "logged_in", false);
+    cJSON_AddBoolToObject(new_player, "eliminated", false);
+    cJSON_AddNumberToObject(new_player, "player_id", cJSON_GetArraySize(players_data) + 1);
+
+    cJSON_AddItemToArray(players_data, new_player);
+
+    return save_players();
+}
+
+// Authenticate a user
+bool authenticate_user(const char *username, const char *password)
+{
+    if (!players_data)
+        return false;
+
+    cJSON *player = NULL;
+    cJSON_ArrayForEach(player, players_data)
+    {
+        cJSON *name = cJSON_GetObjectItem(player, "username");
+        cJSON *pass = cJSON_GetObjectItem(player, "password");
+        if (name && pass && strcmp(name->valuestring, username) == 0 && strcmp(pass->valuestring, password) == 0)
+        {
+            cJSON_ReplaceItemInObject(player, "logged_in", cJSON_CreateBool(true));
+            return save_players();
+        }
+    }
+
+    return false;
+}
+
+// Retrieve question by ID
+cJSON *get_question_by_id(int question_id)
+{
+    if (!questions || !cJSON_IsArray(questions))
+        return NULL;
 
     cJSON *question = NULL;
     cJSON_ArrayForEach(question, questions)
     {
         cJSON *id = cJSON_GetObjectItem(question, "id");
-        if (id && cJSON_IsNumber(id) && id->valueint == question_id)
+        if (id && id->valueint == question_id)
         {
-            // Deep copy the question to ensure memory safety
-            cJSON *question_copy = cJSON_Duplicate(question, 1);
-            if (!question_copy)
-            {
-                printf("Failed to duplicate question ID %d.\n", question_id);
-            }
-            return question_copy;
+            return cJSON_Duplicate(question, 1);
         }
     }
 
-    printf("Question with ID %d not found.\n", question_id);
     return NULL;
 }
-// Authentication
-bool user_exists(const char *username)
-{
-    FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (!file)
-        return false;
 
-    char line[100];
-    while (fgets(line, sizeof(line), file))
+// Get player by ID
+cJSON *get_player_by_id(int id)
+{
+    if (!players_data || !cJSON_IsArray(players_data))
+        return NULL;
+
+    cJSON *player = NULL;
+    cJSON_ArrayForEach(player, players_data)
     {
-        char stored_username[50];
-        sscanf(line, "%s", stored_username);
-        if (strcmp(username, stored_username) == 0)
+        cJSON *player_id = cJSON_GetObjectItem(player, "player_id");
+        if (player_id && player_id->valueint == id)
         {
-            fclose(file);
-            return true;
+            return player;
         }
     }
 
-    fclose(file);
-    return false;
+    return NULL;
 }
 
-bool register_user(const char *username, const char *password)
+// Validate player answer
+bool validate_answer(int question_id, int selected_option, int player_id)
 {
-    pthread_mutex_lock(&lock);
-    if (user_exists(username))
+    cJSON *player = get_player_by_id(player_id);
+    if (!player || cJSON_IsTrue(cJSON_GetObjectItem(player, "eliminated")))
     {
-        pthread_mutex_unlock(&lock);
         return false;
     }
 
-    FILE *file = fopen(CREDENTIALS_FILE, "a");
-    if (!file)
-    {
-        pthread_mutex_unlock(&lock);
-        return false;
-    }
-
-    fprintf(file, "%s %s\n", username, password);
-    fclose(file);
-    pthread_mutex_unlock(&lock);
-    return true;
-}
-
-bool authenticate_user(const char *username, const char *password)
-{
-    FILE *file = fopen(CREDENTIALS_FILE, "r");
-    if (!file)
-        return false;
-
-    char line[100], stored_username[50], stored_password[50];
-    while (fgets(line, sizeof(line), file))
-    {
-        sscanf(line, "%s %s", stored_username, stored_password);
-        if (strcmp(username, stored_username) == 0 && strcmp(password, stored_password) == 0)
-        {
-            fclose(file);
-            return true;
-        }
-    }
-
-    fclose(file);
-    return false;
-}
-
-// Game Processing
-// Check if an answer is correct
-bool validate_answer(int question_id, int selected_option)
-{
     cJSON *question = get_question_by_id(question_id);
     if (!question)
+    {
         return false;
-
-    cJSON *correct_option = cJSON_GetObjectItem(question, "correct_option");
-    bool is_correct = correct_option && correct_option->valueint == selected_option;
-
-    cJSON_Delete(question); // Free memory of the duplicated question
-    return is_correct;
-}
-
-// Process a client's answer and broadcast the result
-void process_answer(int sock, int question_id, int selected_option, int player_id, Player *players, int player_count)
-{
-    // Find the player by player_id
-    Player *current_player = NULL;
-    for (int i = 0; i < player_count; i++)
-    {
-        if (players[i].player_id == player_id)
-        {
-            current_player = &players[i];
-            break;
-        }
     }
 
-    if (!current_player)
-    {
-        // Handle error: player not found
-        char error_response[256];
-        snprintf(error_response, sizeof(error_response),
-                 "{\"type\":\"Answer_Response\",\"status\":\"failed\",\"message\":\"Player not found\"}");
-        send(sock, error_response, strlen(error_response), 0);
-        return;
-    }
-
-    // Process the answer (you'll need logic to check the correct answer)
-    cJSON *question_data = get_question_by_id(question_id);
-    if (!question_data)
-    {
-        char error_response[256];
-        snprintf(error_response, sizeof(error_response),
-                 "{\"type\":\"Answer_Response\",\"status\":\"failed\",\"message\":\"Invalid question ID\"}");
-        send(sock, error_response, strlen(error_response), 0);
-        return;
-    }
-
-    int correct_option = cJSON_GetObjectItem(question_data, "correct_option")->valueint;
-
+    int correct_option = cJSON_GetObjectItem(question, "correct_option")->valueint;
     if (selected_option == correct_option)
     {
-        current_player->score += 10; // Award points for correct answer
+        int score = cJSON_GetObjectItem(player, "score")->valueint;
+        cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score + 10));
     }
     else
     {
-        current_player->score -= 5; // Deduct points for incorrect answer
+        cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
     }
 
-    // Send response back to the client
-    char response[256];
-    snprintf(response, sizeof(response),
-             "{\"type\":\"Answer_Response\",\"score\":%d}", current_player->score);
-    send(sock, response, strlen(response), 0);
-
-    // Cleanup question data
-    cJSON_Delete(question_data);
+    save_players();
+    cJSON_Delete(question);
+    return true;
 }

@@ -74,7 +74,7 @@ void process_server_message(char *buffer)
 
     const char *type = cJSON_GetObjectItem(message, "type")->valuestring;
 
-    if (strcmp(type, "Login_Request") == 0)
+    if (strcmp(type, "Login_Response") == 0)
     {
         const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
         if (strcmp(status, "success") == 0)

@@ -12,6 +12,7 @@
 
 #define PORT 8081
 #define MAX_CLIENTS 100
+#define BUFFER_SIZE 1024
 
 Player players[MAX_CLIENTS];
 int player_count = 0;
@@ -20,8 +21,7 @@ int next_player_id = 1; // Unique ID generator
 pthread_mutex_t clients_lock = PTHREAD_MUTEX_INITIALIZER; // Mutex to protect player data
 pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t command_cond = PTHREAD_COND_INITIALIZER;
-int start_game_flag = 0;  // Flag to indicate when START_GAME is triggered
-int question_counter = 0; // Counter for generating unique question IDs
+int start_game_flag = 0; // Flag to indicate when START_GAME is triggered
 
 void broadcast(const char *message)
 {
@@ -166,10 +166,11 @@ void *read_server_input(void *arg)
 void *handle_client(void *arg)
 {
     int sock = *(int *)arg;
-    char buffer[1024];
+    char buffer[BUFFER_SIZE];
     char username[50] = {0};
     bool logged_in = false;
-    int player_id = -1;
+
+    memset(buffer, 0, BUFFER_SIZE);
 
     while (recv(sock, buffer, sizeof(buffer), 0) > 0)
     {
@@ -186,10 +187,10 @@ void *handle_client(void *arg)
         cJSON *data = cJSON_GetObjectItem(request, "data");
 
         cJSON *response = cJSON_CreateObject();
-        cJSON_AddStringToObject(response, "type", type);
 
         if (strcmp(type, "Register_Request") == 0)
         {
+            cJSON_AddStringToObject(response, "type", "Register_Response");
             const char *reg_username = cJSON_GetObjectItem(data, "username")->valuestring;
             const char *reg_password = cJSON_GetObjectItem(data, "password")->valuestring;
 
@@ -206,6 +207,7 @@ void *handle_client(void *arg)
         }
         else if (strcmp(type, "Login_Request") == 0)
         {
+            cJSON_AddStringToObject(response, "type", "Login_Response");
             const char *login_username = cJSON_GetObjectItem(data, "username")->valuestring;
             const char *login_password = cJSON_GetObjectItem(data, "password")->valuestring;
 
@@ -214,20 +216,8 @@ void *handle_client(void *arg)
                 logged_in = true;
                 strcpy(username, login_username);
 
-                // Assign a unique player ID
-                player_id = next_player_id++;
-                pthread_mutex_lock(&clients_lock);
-                players[player_count].socket = sock;
-                players[player_count].player_id = player_id;
-                strcpy(players[player_count].username, username);
-                players[player_count].logged_in = true;
-                players[player_count].score = 0;
-                player_count++;
-                pthread_mutex_unlock(&clients_lock);
-
                 // Sending Response
                 cJSON_AddStringToObject(response, "status", "success");
-                cJSON_AddNumberToObject(response, "player_id", player_id);
                 cJSON_AddStringToObject(response, "message", "Login successful");
             }
             else
@@ -238,6 +228,7 @@ void *handle_client(void *arg)
         }
         else if (strcmp(type, "Logout_Request") == 0)
         {
+            cJSON_AddStringToObject(response, "type", "Logout_Response");
             if (logged_in)
             {
                 logged_in = false;
@@ -273,6 +264,7 @@ void *handle_client(void *arg)
         {
             if (logged_in)
             {
+                cJSON_Delete(response);
                 cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
                 cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
                 cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
@@ -285,21 +277,22 @@ void *handle_client(void *arg)
                     int question_id = question_id_item->valueint;
                     int selected_option = answer_item->valueint;
 
-                    process_answer(sock, question_id, selected_option, player_id, players, player_count);
+                    validate_answer(question_id, selected_option, player_id);
+                    // process_answer(sock, question_id, selected_option, player_id, players, player_count);
                     // cJSON_AddStringToObject(response, "status", "success");
                     // cJSON_AddStringToObject(response, "message", "Answer processed");
                 }
-                else
-                {
-                    cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Invalid player ID, question ID, or answer");
-                }
+                // else
+                // {
+                //     cJSON_AddStringToObject(response, "status", "failed");
+                //     cJSON_AddStringToObject(response, "message", "Invalid player ID, question ID, or answer");
+                // }
             }
-            else
-            {
-                cJSON_AddStringToObject(response, "status", "failed");
-                cJSON_AddStringToObject(response, "message", "Not logged in");
-            }
+            // else
+            // {
+            //     cJSON_AddStringToObject(response, "status", "failed");
+            //     cJSON_AddStringToObject(response, "message", "Not logged in");
+            // }
         }
         else
         {
