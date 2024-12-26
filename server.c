@@ -10,7 +10,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8081
+#define PORT 8080
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
@@ -211,14 +211,52 @@ void *handle_client(void *arg)
             const char *login_username = cJSON_GetObjectItem(data, "username")->valuestring;
             const char *login_password = cJSON_GetObjectItem(data, "password")->valuestring;
 
+            // Authenticate user
             if (authenticate_user(login_username, login_password))
             {
                 logged_in = true;
                 strcpy(username, login_username);
 
+                // Find player_id from players.json
+                int player_id = -1; // Default invalid ID
+                FILE *file = fopen("players.json", "r");
+                if (file)
+                {
+                    fseek(file, 0, SEEK_END);
+                    long file_size = ftell(file);
+                    fseek(file, 0, SEEK_SET);
+
+                    char *file_content = malloc(file_size + 1);
+                    fread(file_content, 1, file_size, file);
+                    fclose(file);
+
+                    file_content[file_size] = '\0'; // Null-terminate string
+
+                    cJSON *players = cJSON_Parse(file_content);
+                    free(file_content);
+
+                    if (players)
+                    {
+                        cJSON *player = NULL;
+                        cJSON_ArrayForEach(player, players)
+                        {
+                            const char *username = cJSON_GetObjectItem(player, "username")->valuestring;
+                            if (strcmp(username, login_username) == 0)
+                            {
+                                player_id = cJSON_GetObjectItem(player, "player_id")->valueint;
+                                break; // Found the user, no need to continue searching
+                            }
+                        }
+                        cJSON_Delete(players);
+                    }
+                }
+
                 // Sending Response
                 cJSON_AddStringToObject(response, "status", "success");
                 cJSON_AddStringToObject(response, "message", "Login successful");
+
+                // Add player_id to the response
+                cJSON_AddNumberToObject(response, "player_id", player_id);
             }
             else
             {
@@ -229,28 +267,78 @@ void *handle_client(void *arg)
         else if (strcmp(type, "Logout_Request") == 0)
         {
             cJSON_AddStringToObject(response, "type", "Logout_Response");
+
             if (logged_in)
             {
                 logged_in = false;
-                char temp_username[50];
-                strcpy(temp_username, username); // Preserve username for lookup
-                memset(username, 0, sizeof(username));
 
-                pthread_mutex_lock(&clients_lock);
-                for (int i = 0; i < player_count; i++)
+                // Update the players.json file to set logged_in = false
+                FILE *file = fopen("players.json", "r");
+                if (!file)
                 {
-                    if (strcmp(players[i].username, temp_username) == 0)
+                    fprintf(stderr, "Failed to open players.json for reading.\n");
+                    cJSON_AddStringToObject(response, "status", "failed");
+                    cJSON_AddStringToObject(response, "message", "Internal error");
+                    break;
+                }
+
+                fseek(file, 0, SEEK_END);
+                long file_size = ftell(file);
+                fseek(file, 0, SEEK_SET);
+
+                char *file_content = malloc(file_size + 1);
+                fread(file_content, 1, file_size, file);
+                fclose(file);
+                file_content[file_size] = '\0';
+
+                cJSON *players_data = cJSON_Parse(file_content);
+                free(file_content);
+
+                if (!players_data)
+                {
+                    fprintf(stderr, "Failed to parse players.json.\n");
+                    cJSON_AddStringToObject(response, "status", "failed");
+                    cJSON_AddStringToObject(response, "message", "Internal error");
+                    break;
+                }
+
+                // Update the 'logged_in' field for the logged-out player
+                cJSON *player = NULL;
+                cJSON_ArrayForEach(player, players_data)
+                {
+                    cJSON *name = cJSON_GetObjectItem(player, "username");
+                    if (name && strcmp(name->valuestring, username) == 0)
                     {
-                        for (int j = i; j < player_count - 1; j++)
-                        {
-                            players[j] = players[j + 1];
-                        }
-                        player_count--;
+                        // Set logged_in = false
+                        cJSON_ReplaceItemInObject(player, "logged_in", cJSON_CreateBool(false));
                         break;
                     }
                 }
-                pthread_mutex_unlock(&clients_lock);
 
+                // Save updated data back to file
+                FILE *save_file = fopen("players.json", "w");
+                if (save_file)
+                {
+                    char *updated_content = cJSON_Print(players_data);
+                    fwrite(updated_content, 1, strlen(updated_content), save_file);
+                    fclose(save_file);
+                    free(updated_content);
+                }
+                else
+                {
+                    fprintf(stderr, "Failed to save updated players data.\n");
+                    cJSON_Delete(players_data);
+                    cJSON_AddStringToObject(response, "status", "failed");
+                    cJSON_AddStringToObject(response, "message", "Internal error");
+                    break;
+                }
+
+                cJSON_Delete(players_data);
+
+                // Clear username in memory
+                memset(username, 0, sizeof(username));
+
+                // Send success response
                 cJSON_AddStringToObject(response, "status", "success");
                 cJSON_AddStringToObject(response, "message", "Logout successful");
             }

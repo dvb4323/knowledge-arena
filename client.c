@@ -8,7 +8,7 @@
 #include "cJSON.h"
 
 #define SERVER_IP "127.0.0.1"
-#define PORT 8081
+#define PORT 8080
 
 int player_id = -1;
 int waiting_for_answer = 0;

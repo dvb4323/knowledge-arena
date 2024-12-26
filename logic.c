@@ -104,17 +104,89 @@ bool load_players()
 // Save players data without mutex
 bool save_players()
 {
-    if (!players_data)
+    FILE *file = fopen(PLAYERS_FILE, "r");
+    cJSON *existing_data = NULL;
+
+    // Load existing data
+    if (file)
     {
-        fprintf(stderr, "Players data is not initialized\n");
+        fseek(file, 0, SEEK_END);
+        long file_size = ftell(file);
+        rewind(file);
+
+        char *buffer = malloc(file_size + 1);
+        fread(buffer, 1, file_size, file);
+        buffer[file_size] = '\0';
+        fclose(file);
+
+        existing_data = cJSON_Parse(buffer);
+        free(buffer);
+
+        if (!existing_data || !cJSON_IsArray(existing_data))
+        {
+            existing_data = cJSON_CreateArray();
+        }
+    }
+    else
+    {
+        existing_data = cJSON_CreateArray();
+    }
+
+    // Update or add entries without duplication
+    cJSON *player = NULL;
+    cJSON *existing_player = NULL;
+
+    cJSON_ArrayForEach(player, players_data)
+    {
+        bool found = false;
+
+        cJSON_ArrayForEach(existing_player, existing_data)
+        {
+            cJSON *existing_username = cJSON_GetObjectItem(existing_player, "username");
+            cJSON *player_username = cJSON_GetObjectItem(player, "username");
+
+            if (existing_username && player_username &&
+                strcmp(existing_username->valuestring, player_username->valuestring) == 0)
+            {
+                // Update the existing player
+                cJSON_ReplaceItemInObject(existing_player, "password",
+                                          cJSON_Duplicate(cJSON_GetObjectItem(player, "password"), 1));
+                cJSON_ReplaceItemInObject(existing_player, "score",
+                                          cJSON_Duplicate(cJSON_GetObjectItem(player, "score"), 1));
+                cJSON_ReplaceItemInObject(existing_player, "logged_in",
+                                          cJSON_Duplicate(cJSON_GetObjectItem(player, "logged_in"), 1));
+                cJSON_ReplaceItemInObject(existing_player, "eliminated",
+                                          cJSON_Duplicate(cJSON_GetObjectItem(player, "eliminated"), 1));
+                cJSON_ReplaceItemInObject(existing_player, "player_id",
+                                          cJSON_Duplicate(cJSON_GetObjectItem(player, "player_id"), 1));
+                found = true;
+                break;
+            }
+        }
+
+        // If not found, add the new player
+        if (!found)
+        {
+            cJSON_AddItemToArray(existing_data, cJSON_Duplicate(player, 1));
+        }
+    }
+
+    // Write back to the file
+    file = fopen(PLAYERS_FILE, "w");
+    if (!file)
+    {
+        perror("Failed to open players file for writing");
+        cJSON_Delete(existing_data);
         return false;
     }
 
-    char *data = cJSON_Print(players_data);
-    bool result = write_file(PLAYERS_FILE, data);
-    free(data);
+    char *data = cJSON_Print(existing_data);
+    fwrite(data, 1, strlen(data), file);
+    fclose(file);
 
-    return result;
+    free(data);
+    cJSON_Delete(existing_data);
+    return true;
 }
 
 // Register a new user
@@ -151,22 +223,75 @@ bool register_user(const char *username, const char *password)
 // Authenticate a user
 bool authenticate_user(const char *username, const char *password)
 {
-    if (!players_data)
+    // Reload the latest players data from file
+    FILE *file = fopen("players.json", "r");
+    if (!file)
+    {
+        fprintf(stderr, "Failed to open players.json for reading.\n");
         return false;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *file_content = malloc(file_size + 1);
+    fread(file_content, 1, file_size, file);
+    fclose(file);
+    file_content[file_size] = '\0';
+
+    // Parse the updated JSON data
+    cJSON *updated_players_data = cJSON_Parse(file_content);
+    free(file_content);
+
+    if (!updated_players_data)
+    {
+        fprintf(stderr, "Failed to parse players.json.\n");
+        return false;
+    }
 
     cJSON *player = NULL;
-    cJSON_ArrayForEach(player, players_data)
+
+    cJSON_ArrayForEach(player, updated_players_data)
     {
         cJSON *name = cJSON_GetObjectItem(player, "username");
         cJSON *pass = cJSON_GetObjectItem(player, "password");
-        if (name && pass && strcmp(name->valuestring, username) == 0 && strcmp(pass->valuestring, password) == 0)
+        cJSON *logged_in = cJSON_GetObjectItem(player, "logged_in");
+
+        // Ensure fields are valid
+        if (!name || !pass || !logged_in)
         {
+            continue;
+        }
+
+        if (strcmp(name->valuestring, username) == 0 && strcmp(pass->valuestring, password) == 0)
+        {
+            // Update 'logged_in' status
             cJSON_ReplaceItemInObject(player, "logged_in", cJSON_CreateBool(true));
-            return save_players();
+
+            // Save changes back to file
+            FILE *save_file = fopen("players.json", "w");
+            if (save_file)
+            {
+                char *updated_content = cJSON_Print(updated_players_data);
+                fwrite(updated_content, 1, strlen(updated_content), save_file);
+                fclose(save_file);
+                free(updated_content);
+            }
+            else
+            {
+                fprintf(stderr, "Failed to save updated players data.\n");
+                cJSON_Delete(updated_players_data);
+                return false;
+            }
+
+            cJSON_Delete(updated_players_data); // Free memory
+            return true;
         }
     }
 
-    return false;
+    cJSON_Delete(updated_players_data); // Free memory
+    return false;                       // Authentication failed
 }
 
 // Retrieve question by ID
