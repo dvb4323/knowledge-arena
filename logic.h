@@ -14,7 +14,10 @@ bool user_exists(const char *username);
 bool register_user(const char *username, const char *password);
 
 // Xác thực thông tin đăng nhập
-bool authenticate_user(const char *username, const char *password);
+bool authenticate_user(const char *username, const char *password, int sock);
+
+// Get clients
+void get_logged_in_clients(int *sockets, int *count);
 
 // Quản lý dữ liệu người chơi
 bool load_players();                     // Tải dữ liệu người chơi từ file JSON
@@ -36,6 +39,7 @@ typedef struct
     char username[50];
     bool logged_in;
     int score;
+    char password[50];
     bool eliminated; // Thêm trạng thái bị loại
 } Player;
 
