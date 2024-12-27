@@ -13,7 +13,7 @@
 
 // Static variables for storing data
 static cJSON *questions = NULL;
-static cJSON *players_data = NULL;
+extern cJSON *players_data;
 
 // Read entire file into memory
 char *read_file(const char *filename)
@@ -57,6 +57,53 @@ bool write_file(const char *filename, const char *data)
     fwrite(data, 1, strlen(data), file);
     fclose(file);
     return true;
+}
+
+// Function to get logged-in clients
+void get_logged_in_clients(int *sockets, int *count)
+{
+    *count = 0;
+
+    FILE *file = fopen("players.json", "r");
+    if (!file)
+    {
+        fprintf(stderr, "Failed to open players.json for reading.\n");
+        return;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *file_content = malloc(file_size + 1);
+    fread(file_content, 1, file_size, file);
+    fclose(file);
+    file_content[file_size] = '\0';
+
+    cJSON *players_data = cJSON_Parse(file_content);
+    free(file_content);
+
+    if (!players_data)
+    {
+        fprintf(stderr, "Failed to parse players.json.\n");
+        return;
+    }
+
+    cJSON *player = NULL;
+    cJSON_ArrayForEach(player, players_data)
+    {
+        cJSON *logged_in = cJSON_GetObjectItem(player, "logged_in");
+        cJSON *socket = cJSON_GetObjectItem(player, "socket");
+
+        if (logged_in && cJSON_IsTrue(logged_in) &&
+            socket && cJSON_IsNumber(socket))
+        {
+            sockets[*count] = socket->valueint;
+            (*count)++;
+        }
+    }
+
+    cJSON_Delete(players_data);
 }
 
 // Load questions
@@ -221,7 +268,7 @@ bool register_user(const char *username, const char *password)
 }
 
 // Authenticate a user
-bool authenticate_user(const char *username, const char *password)
+bool authenticate_user(const char *username, const char *password, int sock)
 {
     // Reload the latest players data from file
     FILE *file = fopen("players.json", "r");
@@ -268,6 +315,9 @@ bool authenticate_user(const char *username, const char *password)
         {
             // Update 'logged_in' status
             cJSON_ReplaceItemInObject(player, "logged_in", cJSON_CreateBool(true));
+
+            // Add 'socket' field
+            cJSON_AddItemToObject(player, "socket", cJSON_CreateNumber(sock));
 
             // Save changes back to file
             FILE *save_file = fopen("players.json", "w");
@@ -333,32 +383,45 @@ cJSON *get_player_by_id(int id)
 }
 
 // Validate player answer
-bool validate_answer(int question_id, int selected_option, int player_id)
+bool validate_answer(int player_id, int question_id, int selected_option)
 {
+    // Find player and ensure they're not eliminated
     cJSON *player = get_player_by_id(player_id);
     if (!player || cJSON_IsTrue(cJSON_GetObjectItem(player, "eliminated")))
     {
-        return false;
+        return false; // Player eliminated or not found
     }
 
+    // Get the question and validate the selected option
     cJSON *question = get_question_by_id(question_id);
     if (!question)
     {
-        return false;
+        return false; // Question not found
     }
 
     int correct_option = cJSON_GetObjectItem(question, "correct_option")->valueint;
     if (selected_option == correct_option)
     {
+        // Update score
         int score = cJSON_GetObjectItem(player, "score")->valueint;
         cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score + 10));
     }
     else
     {
+        // Mark player as eliminated
         cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
     }
 
-    save_players();
-    cJSON_Delete(question);
-    return true;
+    // Write the updated in-memory players_data directly
+    char *data = cJSON_Print(players_data);
+    if (!write_file(PLAYERS_FILE, data)) // Save updated data directly
+    {
+        free(data);
+        cJSON_Delete(question);
+        return false;
+    }
+
+    free(data);             // Cleanup
+    cJSON_Delete(question); // Free question memory
+    return true;            // Update successful
 }

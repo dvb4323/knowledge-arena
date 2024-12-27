@@ -8,7 +8,7 @@
 #include "cJSON.h"
 
 #define SERVER_IP "127.0.0.1"
-#define PORT 8080
+#define PORT 8081
 
 int player_id = -1;
 int waiting_for_answer = 0;
@@ -46,7 +46,7 @@ void send_answer(int sock, int question_id, int answer)
     }
 
     cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "type", "Answer_Response");
+    cJSON_AddStringToObject(response, "type", "Answer_Request");
 
     cJSON *data = cJSON_CreateObject();
     cJSON_AddNumberToObject(data, "player_id", player_id);

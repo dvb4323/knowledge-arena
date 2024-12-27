@@ -10,14 +10,15 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8080
+#define PORT 8081
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
-Player players[MAX_CLIENTS];
-int player_count = 0;
-int next_player_id = 1; // Unique ID generator
+// Player players[MAX_CLIENTS];
+// int player_count = 0;
+// int next_player_id = 1; // Unique ID generator
 
+cJSON *players_data = NULL;
 pthread_mutex_t clients_lock = PTHREAD_MUTEX_INITIALIZER; // Mutex to protect player data
 pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t command_cond = PTHREAD_COND_INITIALIZER;
@@ -25,14 +26,23 @@ int start_game_flag = 0; // Flag to indicate when START_GAME is triggered
 
 void broadcast(const char *message)
 {
+    int sockets[100]; // Assuming a max of 100 clients
+    int count = 0;
+
     pthread_mutex_lock(&clients_lock);
-    for (int i = 0; i < player_count; i++)
+
+    // Fetch all logged-in clients
+    get_logged_in_clients(sockets, &count);
+
+    for (int i = 0; i < count; i++)
     {
-        if (players[i].logged_in)
+        int bytes_sent = send(sockets[i], message, strlen(message), 0);
+        if (bytes_sent < 0)
         {
-            send(players[i].socket, message, strlen(message), 0);
+            perror("Broadcast send failed");
         }
     }
+
     pthread_mutex_unlock(&clients_lock);
 }
 
@@ -212,7 +222,7 @@ void *handle_client(void *arg)
             const char *login_password = cJSON_GetObjectItem(data, "password")->valuestring;
 
             // Authenticate user
-            if (authenticate_user(login_username, login_password))
+            if (authenticate_user(login_username, login_password, sock))
             {
                 logged_in = true;
                 strcpy(username, login_username);
@@ -311,6 +321,8 @@ void *handle_client(void *arg)
                     {
                         // Set logged_in = false
                         cJSON_ReplaceItemInObject(player, "logged_in", cJSON_CreateBool(false));
+                        // Remove 'socket' field
+                        cJSON_DeleteItemFromObject(player, "socket");
                         break;
                     }
                 }
@@ -348,39 +360,25 @@ void *handle_client(void *arg)
                 cJSON_AddStringToObject(response, "message", "Not logged in");
             }
         }
-        else if (strcmp(type, "Answer_Response") == 0)
+        else if (strcmp(type, "Answer_Request") == 0)
         {
-            if (logged_in)
+            // cJSON_Delete(response);
+            cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
+            cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
+            cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
+
+            if (player_id_item && cJSON_IsNumber(player_id_item) &&
+                question_id_item && cJSON_IsNumber(question_id_item) &&
+                answer_item && cJSON_IsNumber(answer_item))
             {
-                cJSON_Delete(response);
-                cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
-                cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
-                cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
+                int player_id = player_id_item->valueint;
+                int question_id = question_id_item->valueint;
+                int selected_option = answer_item->valueint;
 
-                if (player_id_item && cJSON_IsNumber(player_id_item) &&
-                    question_id_item && cJSON_IsNumber(question_id_item) &&
-                    answer_item && cJSON_IsNumber(answer_item))
-                {
-                    int player_id = player_id_item->valueint;
-                    int question_id = question_id_item->valueint;
-                    int selected_option = answer_item->valueint;
-
-                    validate_answer(question_id, selected_option, player_id);
-                    // process_answer(sock, question_id, selected_option, player_id, players, player_count);
-                    // cJSON_AddStringToObject(response, "status", "success");
-                    // cJSON_AddStringToObject(response, "message", "Answer processed");
-                }
-                // else
-                // {
-                //     cJSON_AddStringToObject(response, "status", "failed");
-                //     cJSON_AddStringToObject(response, "message", "Invalid player ID, question ID, or answer");
-                // }
+                validate_answer(player_id, question_id, selected_option);
+                cJSON_AddStringToObject(response, "type", "Answer_Response");
+                cJSON_AddStringToObject(response, "status", "success");
             }
-            // else
-            // {
-            //     cJSON_AddStringToObject(response, "status", "failed");
-            //     cJSON_AddStringToObject(response, "message", "Not logged in");
-            // }
         }
         else
         {
@@ -395,25 +393,6 @@ void *handle_client(void *arg)
         cJSON_Delete(response);
         cJSON_Delete(request);
         memset(buffer, 0, sizeof(buffer));
-    }
-
-    // Cleanup on disconnect
-    if (logged_in)
-    {
-        pthread_mutex_lock(&clients_lock);
-        for (int i = 0; i < player_count; i++)
-        {
-            if (players[i].socket == sock)
-            {
-                for (int j = i; j < player_count - 1; j++)
-                {
-                    players[j] = players[j + 1];
-                }
-                player_count--;
-                break;
-            }
-        }
-        pthread_mutex_unlock(&clients_lock);
     }
 
     printf("Client (%d) disconnected.\n", sock);
@@ -432,6 +411,13 @@ int main()
     {
         fprintf(stderr, "Failed to load questions. Exiting...\n");
         exit(EXIT_FAILURE);
+    }
+
+    // Load players data
+    if (!load_players())
+    {
+        fprintf(stderr, "Failed to load players\n");
+        return 1;
     }
 
     if (server_socket == -1)
