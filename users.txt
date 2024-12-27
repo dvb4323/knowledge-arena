@@ -1,6 +1,0 @@
-abcd 123456
-abcde 1234
-abcdef 1234
-ABCDEGH 123
-ABC 123
-123 123
