@@ -355,6 +355,7 @@ void select_main_player_and_broadcast()
             if (player_id && player_id->valueint == selected_player_id)
             {
                 cJSON_ReplaceItemInObject(player, "main_player", cJSON_CreateBool(true));
+                cJSON_ReplaceItemInObject(player, "skip_count", cJSON_CreateNumber(2));
             }
             else
             {
