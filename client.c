@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/select.h>
+#include <time.h>
 #include "cJSON.h"
 
 #define SERVER_IP "127.0.0.1"
@@ -45,19 +46,34 @@ void send_answer(int sock, int question_id, int answer)
         return;
     }
 
+    // Get the current timestamp (Unix time)
+    time_t current_time = time(NULL);
+    if (current_time == -1)
+    {
+        printf("Error: Unable to get the current time.\n");
+        return;
+    }
+
     cJSON *response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "type", "Answer_Request");
 
+    // Prepare the data object
     cJSON *data = cJSON_CreateObject();
     cJSON_AddNumberToObject(data, "player_id", player_id);
     cJSON_AddNumberToObject(data, "question_id", question_id);
     cJSON_AddNumberToObject(data, "answer", answer);
+
+    // Add the timestamp to the data object
+    cJSON_AddNumberToObject(data, "timestamp", (int)current_time);
+
     cJSON_AddItemToObject(response, "data", data);
 
+    // Send the answer request to the server
     char *json_message = cJSON_PrintUnformatted(response);
     send(sock, json_message, strlen(json_message), 0);
     printf("Sent to server: %s\n", json_message);
 
+    // Clean up
     free(json_message);
     cJSON_Delete(response);
 }

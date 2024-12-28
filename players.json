@@ -3,7 +3,9 @@
     "username": "ABC",
     "password": "123",
     "player_id": 1,
-    "score": 0,
+    "score": 80,
+    "main_player": false,
+    "skip_count": 0,
     "logged_in": false,
     "eliminated": false
   },
@@ -12,6 +14,8 @@
     "password": "456",
     "player_id": 2,
     "score": 0,
+    "main_player": false,
+    "skip_count": 0,
     "logged_in": false,
     "eliminated": false
   }

@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <sys/socket.h>
 #include <ctype.h>
+#include <time.h>
 #include "logic.h"
 #include "cJSON.h"
 
@@ -46,25 +47,58 @@ void broadcast(const char *message)
     pthread_mutex_unlock(&clients_lock);
 }
 
-void send_start_game_message()
-{
-    cJSON *start_message = cJSON_CreateObject();
-    cJSON_AddStringToObject(start_message, "type", "Start_Game");
+// void broadcast_question(int question_id)
+// {
+//     cJSON *original_question = get_question_by_id(question_id);
+//     if (!original_question)
+//     {
+//         printf("Question with ID %d not found.\n", question_id);
+//         return;
+//     }
 
-    cJSON *data = cJSON_CreateObject();
-    cJSON_AddStringToObject(data, "message", "Tro choi bat dau");
-    cJSON_AddItemToObject(start_message, "data", data);
+//     // Get the current timestamp as the question start time
+//     time_t current_time = time(NULL);
+//     if (current_time == -1)
+//     {
+//         printf("Error: Unable to get the current time.\n");
+//         return;
+//     }
 
-    char *start_str = cJSON_PrintUnformatted(start_message);
+//     // Update the start time for all players in players.json
 
-    broadcast(start_str);
+//     // Create a custom JSON object for broadcasting
+//     cJSON *broadcast_message = cJSON_CreateObject();
+//     cJSON_AddStringToObject(broadcast_message, "type", "Question_Broadcast");
 
-    free(start_str);
-    cJSON_Delete(start_message);
-}
+//     cJSON *data = cJSON_CreateObject();
+//     cJSON_AddNumberToObject(data, "question_id", question_id);
 
+//     cJSON *question_text = cJSON_GetObjectItem(original_question, "question");
+//     if (question_text && cJSON_IsString(question_text))
+//     {
+//         cJSON_AddStringToObject(data, "question_text", question_text->valuestring);
+//     }
+
+//     cJSON *options = cJSON_GetObjectItem(original_question, "options");
+//     if (options && cJSON_IsArray(options))
+//     {
+//         cJSON_AddItemToObject(data, "options", cJSON_Duplicate(options, 1)); // Deep copy the options array
+//     }
+
+//     cJSON_AddItemToObject(broadcast_message, "data", data);
+
+//     // Convert to string and broadcast
+//     char *message_str = cJSON_PrintUnformatted(broadcast_message);
+//     broadcast(message_str); // Use the existing `broadcast` function to send to all clients
+
+//     free(message_str);
+//     cJSON_Delete(broadcast_message);
+// }
+
+// Send questions
 void broadcast_question(int question_id)
 {
+    // Load the question
     cJSON *original_question = get_question_by_id(question_id);
     if (!original_question)
     {
@@ -72,7 +106,80 @@ void broadcast_question(int question_id)
         return;
     }
 
-    // Create a custom JSON object for broadcasting
+    // Read players.json manually
+    FILE *file = fopen(PLAYERS_FILE, "r");
+    if (!file)
+    {
+        perror("Failed to open players.json");
+        return;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *content = (char *)malloc(length + 1);
+    if (!content)
+    {
+        fclose(file);
+        printf("Memory allocation error.\n");
+        return;
+    }
+
+    fread(content, 1, length, file);
+    fclose(file);
+    content[length] = '\0';
+
+    cJSON *players_data = cJSON_Parse(content);
+    free(content);
+    if (!players_data || !cJSON_IsArray(players_data))
+    {
+        printf("Error: Players data not found or invalid.\n");
+        cJSON_Delete(players_data);
+        return;
+    }
+
+    // Get current timestamp
+    time_t current_time = time(NULL);
+
+    // Update or add question_start_time for logged-in and non-eliminated players
+    cJSON *player;
+    cJSON_ArrayForEach(player, players_data)
+    {
+        cJSON *logged_in = cJSON_GetObjectItem(player, "logged_in");
+        cJSON *eliminated = cJSON_GetObjectItem(player, "eliminated");
+        if (cJSON_IsTrue(logged_in) && !cJSON_IsTrue(eliminated))
+        {
+            // Add or update question_start_time
+            cJSON *start_time = cJSON_GetObjectItem(player, "question_start_time");
+            if (!start_time) // If the field does not exist, add it
+            {
+                cJSON_AddNumberToObject(player, "question_start_time", (double)current_time);
+            }
+            else // If it exists, update it
+            {
+                cJSON_ReplaceItemInObject(player, "question_start_time", cJSON_CreateNumber((double)current_time));
+            }
+        }
+    }
+
+    // Save updated players.json (pretty-printed for readability)
+    char *updated_data = cJSON_Print(players_data); // Pretty print for readability
+    file = fopen(PLAYERS_FILE, "w");
+    if (file)
+    {
+        fwrite(updated_data, 1, strlen(updated_data), file);
+        fclose(file);
+    }
+    else
+    {
+        perror("Failed to write players.json");
+    }
+
+    free(updated_data);
+    cJSON_Delete(players_data);
+
+    // Create the broadcast message
     cJSON *broadcast_message = cJSON_CreateObject();
     cJSON_AddStringToObject(broadcast_message, "type", "Question_Broadcast");
 
@@ -99,6 +206,40 @@ void broadcast_question(int question_id)
 
     free(message_str);
     cJSON_Delete(broadcast_message);
+
+    // Handling questions for non_eliminated
+    // Broadcast the question only to non-eliminated and logged-in players
+    // cJSON *player;
+    // cJSON_ArrayForEach(player, players_data)
+    // {
+    //     // Check if the player is logged in and not eliminated
+    //     cJSON *logged_in = cJSON_GetObjectItem(player, "logged_in");
+    //     cJSON *eliminated = cJSON_GetObjectItem(player, "eliminated");
+    //     cJSON *socket_item = cJSON_GetObjectItem(player, "socket");
+
+    //     if (!cJSON_IsTrue(logged_in) || cJSON_IsTrue(eliminated) || !cJSON_IsNumber(socket_item))
+    //     {
+    //         continue; // Skip players who are not eligible
+    //     }
+
+    //     int sock = socket_item->valueint;
+
+    //     // Ensure the socket descriptor is valid before sending
+    //     if (sock > 0)
+    //     {
+    //         if (send(sock, message_str, strlen(message_str), 0) == -1)
+    //         {
+    //             perror("Failed to send question to player");
+    //         }
+    //     }
+    // }
+
+    // // Cleanup
+    // free(message_str);
+    // cJSON_Delete(broadcast_message);
+    // cJSON_Delete(players_data);
+
+    // printf("Broadcasted question ID %d to active players.\n", question_id);
 }
 
 void *game_controller(void *arg)
@@ -366,16 +507,19 @@ void *handle_client(void *arg)
             cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
             cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
             cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
+            cJSON *answer_time_item = cJSON_GetObjectItem(data, "timestamp");
 
             if (player_id_item && cJSON_IsNumber(player_id_item) &&
                 question_id_item && cJSON_IsNumber(question_id_item) &&
-                answer_item && cJSON_IsNumber(answer_item))
+                answer_item && cJSON_IsNumber(answer_item) &&
+                answer_time_item && cJSON_IsNumber(answer_time_item))
             {
                 int player_id = player_id_item->valueint;
                 int question_id = question_id_item->valueint;
                 int selected_option = answer_item->valueint;
+                int answer_time = answer_time_item->valueint;
 
-                validate_answer(player_id, question_id, selected_option);
+                validate_answer(player_id, question_id, selected_option, answer_time);
                 cJSON_AddStringToObject(response, "type", "Answer_Response");
                 cJSON_AddStringToObject(response, "status", "success");
             }

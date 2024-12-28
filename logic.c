@@ -257,10 +257,12 @@ bool register_user(const char *username, const char *password)
     cJSON *new_player = cJSON_CreateObject();
     cJSON_AddStringToObject(new_player, "username", username);
     cJSON_AddStringToObject(new_player, "password", password);
+    cJSON_AddNumberToObject(new_player, "player_id", cJSON_GetArraySize(players_data) + 1);
     cJSON_AddNumberToObject(new_player, "score", 0);
+    cJSON_AddBoolToObject(new_player, "main_player", false);
+    cJSON_AddNumberToObject(new_player, "skip_count", 0);
     cJSON_AddBoolToObject(new_player, "logged_in", false);
     cJSON_AddBoolToObject(new_player, "eliminated", false);
-    cJSON_AddNumberToObject(new_player, "player_id", cJSON_GetArraySize(players_data) + 1);
 
     cJSON_AddItemToArray(players_data, new_player);
 
@@ -383,28 +385,118 @@ cJSON *get_player_by_id(int id)
 }
 
 // Validate player answer
-bool validate_answer(int player_id, int question_id, int selected_option)
+bool validate_answer(int player_id, int question_id, int selected_option, time_t received_timestamp)
 {
-    // Find player and ensure they're not eliminated
-    cJSON *player = get_player_by_id(player_id);
-    if (!player || cJSON_IsTrue(cJSON_GetObjectItem(player, "eliminated")))
+    int QUESTION_TIME_LIMIT = 30;
+    // Reload the players.json file
+    FILE *file = fopen(PLAYERS_FILE, "r");
+    if (!file)
     {
-        return false; // Player eliminated or not found
+        perror("Failed to open players.json");
+        return false;
     }
 
-    // Get the question and validate the selected option
+    fseek(file, 0, SEEK_END);
+    long length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *content = (char *)malloc(length + 1);
+    fread(content, 1, length, file);
+    fclose(file);
+    content[length] = '\0';
+
+    cJSON *players_data = cJSON_Parse(content);
+    free(content);
+    if (!players_data || !cJSON_IsArray(players_data))
+    {
+        printf("Error: Failed to parse players.json.\n");
+        cJSON_Delete(players_data);
+        return false;
+    }
+
+    // Find the player
+    cJSON *player = NULL;
+    cJSON *p;
+    cJSON_ArrayForEach(p, players_data)
+    {
+        cJSON *id = cJSON_GetObjectItem(p, "player_id");
+        if (id && id->valueint == player_id)
+        {
+            player = p;
+            break;
+        }
+    }
+
+    if (!player)
+    {
+        printf("Player with ID %d not found.\n", player_id);
+        cJSON_Delete(players_data);
+        return false;
+    }
+
+    // Ensure player is not eliminated
+    cJSON *eliminated = cJSON_GetObjectItem(player, "eliminated");
+    if (cJSON_IsTrue(eliminated))
+    {
+        printf("Player %d is eliminated.\n", player_id);
+        cJSON_Delete(players_data);
+        return false;
+    }
+
+    // Validate question_start_time
+    cJSON *start_time_item = cJSON_GetObjectItem(player, "question_start_time");
+    if (!start_time_item || !cJSON_IsNumber(start_time_item))
+    {
+        printf("Start time missing for player %d.\n", player_id);
+        cJSON_Delete(players_data);
+        return false;
+    }
+
+    time_t start_time = (time_t)start_time_item->valuedouble;
+    double elapsed_time = difftime(received_timestamp, start_time);
+    printf("Elapsed time: %.2f seconds\n", elapsed_time);
+
+    // Check if the answer is too late
+    if (elapsed_time > QUESTION_TIME_LIMIT) // e.g., QUESTION_TIME_LIMIT = 10 seconds
+    {
+        // Eliminate player for exceeding the time limit
+        cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
+        printf("Player %d eliminated for exceeding time limit.\n", player_id);
+
+        // Save the updated players.json file
+        char *updated_data = cJSON_Print(players_data);
+        file = fopen(PLAYERS_FILE, "w");
+        if (file)
+        {
+            fwrite(updated_data, 1, strlen(updated_data), file);
+            fclose(file);
+        }
+        else
+        {
+            perror("Failed to write players.json");
+        }
+
+        free(updated_data);
+        cJSON_Delete(players_data);
+        return false;
+    }
+
+    // Validate the answer
     cJSON *question = get_question_by_id(question_id);
     if (!question)
     {
-        return false; // Question not found
+        printf("Question %d not found.\n", question_id);
+        cJSON_Delete(players_data);
+        return false;
     }
 
     int correct_option = cJSON_GetObjectItem(question, "correct_option")->valueint;
     if (selected_option == correct_option)
     {
         // Update score
-        int score = cJSON_GetObjectItem(player, "score")->valueint;
-        cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score + 10));
+        cJSON *score_item = cJSON_GetObjectItem(player, "score");
+        int score = score_item->valueint + 10;
+        cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score));
     }
     else
     {
@@ -412,16 +504,21 @@ bool validate_answer(int player_id, int question_id, int selected_option)
         cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
     }
 
-    // Write the updated in-memory players_data directly
-    char *data = cJSON_Print(players_data);
-    if (!write_file(PLAYERS_FILE, data)) // Save updated data directly
+    // Save the updated players.json file
+    char *updated_data = cJSON_Print(players_data);
+    file = fopen(PLAYERS_FILE, "w");
+    if (file)
     {
-        free(data);
-        cJSON_Delete(question);
-        return false;
+        fwrite(updated_data, 1, strlen(updated_data), file);
+        fclose(file);
+    }
+    else
+    {
+        perror("Failed to write players.json");
     }
 
-    free(data);             // Cleanup
-    cJSON_Delete(question); // Free question memory
-    return true;            // Update successful
+    free(updated_data);
+    cJSON_Delete(players_data);
+
+    return true;
 }

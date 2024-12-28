@@ -1,11 +1,17 @@
 #ifndef LOGIC_H
 #define LOGIC_H
 #include <stdbool.h>
+#include <time.h>
 #include "cJSON.h"
 
 // Đường dẫn file dữ liệu
 #define QUESTIONS_FILE "questions.json"
 #define PLAYERS_FILE "players.json"
+
+// Utils
+char *read_file(const char *filename);
+
+bool write_file(const char *filename, const char *data);
 
 // Kiểm tra xem người dùng đã tồn tại chưa
 bool user_exists(const char *username);
@@ -29,7 +35,7 @@ bool load_questions();                      // Tải câu hỏi từ file JSON
 cJSON *get_question_by_id(int question_id); // Truy xuất câu hỏi theo ID
 
 // Xử lý câu trả lời của người chơi
-bool validate_answer(int question_id, int selected_option, int player_id);
+bool validate_answer(int question_id, int selected_option, int player_id, time_t answer_time);
 
 // Định nghĩa cấu trúc dữ liệu người chơi
 typedef struct
@@ -43,7 +49,7 @@ typedef struct
     bool eliminated; // Thêm trạng thái bị loại
 } Player;
 
-// Quản lý điểm số
-bool update_score(const char *username, int score_delta);
+// Send questions
+void broadcast_question(int question_id);
 
 #endif // LOGIC_H
