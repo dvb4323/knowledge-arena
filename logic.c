@@ -384,7 +384,6 @@ cJSON *get_player_by_id(int id)
     return NULL;
 }
 
-// Validate player answer
 bool validate_answer(int player_id, int question_id, int selected_option, time_t received_timestamp)
 {
     int QUESTION_TIME_LIMIT = 30;
@@ -416,13 +415,11 @@ bool validate_answer(int player_id, int question_id, int selected_option, time_t
 
     // Find the player
     cJSON *player = NULL;
-    cJSON *p;
-    cJSON_ArrayForEach(p, players_data)
+    cJSON_ArrayForEach(player, players_data)
     {
-        cJSON *id = cJSON_GetObjectItem(p, "player_id");
+        cJSON *id = cJSON_GetObjectItem(player, "player_id");
         if (id && id->valueint == player_id)
         {
-            player = p;
             break;
         }
     }
@@ -456,8 +453,11 @@ bool validate_answer(int player_id, int question_id, int selected_option, time_t
     double elapsed_time = difftime(received_timestamp, start_time);
     printf("Elapsed time: %.2f seconds\n", elapsed_time);
 
+    // Update elapsed_time in players.json
+    cJSON_AddNumberToObject(player, "elapsed_time", elapsed_time);
+
     // Check if the answer is too late
-    if (elapsed_time > QUESTION_TIME_LIMIT) // e.g., QUESTION_TIME_LIMIT = 10 seconds
+    if (elapsed_time > QUESTION_TIME_LIMIT)
     {
         // Eliminate player for exceeding the time limit
         cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
@@ -497,11 +497,14 @@ bool validate_answer(int player_id, int question_id, int selected_option, time_t
         cJSON *score_item = cJSON_GetObjectItem(player, "score");
         int score = score_item->valueint + 10;
         cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score));
+        cJSON_AddBoolToObject(player, "answer_correct", true);
     }
     else
     {
-        // Mark player as eliminated
-        cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
+        // Mark player as eliminated and set answer_correct to false
+        cJSON_AddBoolToObject(player, "answer_correct", true);
+        cJSON_AddBoolToObject(player, "answer_correct", false);
+
     }
 
     // Save the updated players.json file
