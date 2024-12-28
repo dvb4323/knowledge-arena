@@ -11,7 +11,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8081
+#define PORT 8080
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
@@ -286,6 +286,125 @@ void *game_controller(void *arg)
     return NULL;
 }
 
+void select_main_player_and_broadcast()
+{
+    // Open players.json to retrieve players' data
+    FILE *file = fopen(PLAYERS_FILE, "r");
+    if (!file)
+    {
+        perror("Failed to open players.json");
+        return;
+    }
+
+    fseek(file, 0, SEEK_END);
+    long length = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    char *content = (char *)malloc(length + 1);
+    if (!content)
+    {
+        fclose(file);
+        printf("Memory allocation error.\n");
+        return;
+    }
+
+    fread(content, 1, length, file);
+    fclose(file);
+    content[length] = '\0';
+
+    cJSON *players_data = cJSON_Parse(content);
+    free(content);
+    if (!players_data || !cJSON_IsArray(players_data))
+    {
+        printf("Error: Players data not found or invalid.\n");
+        cJSON_Delete(players_data);
+        return;
+    }
+
+    cJSON *player = NULL;
+    int selected_player_id = -1;
+    double min_elapsed_time = __DBL_MAX__;
+
+    // Iterate through players to find the main player
+    cJSON_ArrayForEach(player, players_data)
+    {
+        cJSON *logged_in = cJSON_GetObjectItem(player, "logged_in");
+        cJSON *eliminated = cJSON_GetObjectItem(player, "eliminated");
+        cJSON *player_id = cJSON_GetObjectItem(player, "player_id");
+        cJSON *elapsed_time = cJSON_GetObjectItem(player, "elapsed_time");
+        cJSON *answer_correct = cJSON_GetObjectItem(player, "answer_correct");
+
+        if (cJSON_IsTrue(logged_in) && !cJSON_IsTrue(eliminated) &&
+            cJSON_IsNumber(elapsed_time) && cJSON_IsTrue(answer_correct))
+        {
+            double time = elapsed_time->valuedouble;
+            if (time < min_elapsed_time)
+            {
+                min_elapsed_time = time;
+                selected_player_id = player_id->valueint;
+            }
+        }
+    }
+
+    if (selected_player_id != -1)
+    {
+        // Update players.json to mark the main player
+        cJSON_ArrayForEach(player, players_data)
+        {
+            cJSON *player_id = cJSON_GetObjectItem(player, "player_id");
+            if (player_id && player_id->valueint == selected_player_id)
+            {
+                cJSON_ReplaceItemInObject(player, "main_player", cJSON_CreateBool(true));
+            }
+            else
+            {
+                cJSON_ReplaceItemInObject(player, "main_player", cJSON_CreateBool(false));
+            }
+        }
+
+        // Save updated players.json
+        FILE *save_file = fopen(PLAYERS_FILE, "w");
+        if (save_file)
+        {
+            char *updated_content = cJSON_Print(players_data);
+            fwrite(updated_content, 1, strlen(updated_content), save_file);
+            fclose(save_file);
+            free(updated_content);
+        }
+        else
+        {
+            perror("Failed to save updated players.json");
+            cJSON_Delete(players_data);
+            return;
+        }
+
+        // Broadcast message to all clients
+        cJSON *broadcast_message = cJSON_CreateObject();
+        cJSON_AddStringToObject(broadcast_message, "type", "Select main player");
+
+        cJSON *data = cJSON_CreateObject();
+        char message[100];
+        snprintf(message, sizeof(message), "player_id%d has been selected as the main player", selected_player_id);
+        cJSON_AddStringToObject(data, "message", message);
+        cJSON_AddItemToObject(broadcast_message, "data", data);
+
+        char *message_str = cJSON_PrintUnformatted(broadcast_message);
+        broadcast(message_str);
+
+        free(message_str);
+        cJSON_Delete(broadcast_message);
+
+        printf("Main player selected: player_id%d\n", selected_player_id);
+    }
+    else
+    {
+        printf("No eligible player found to be the main player.\n");
+    }
+
+    cJSON_Delete(players_data);
+}
+
+
 void *read_server_input(void *arg)
 {
     while (1)
@@ -307,12 +426,19 @@ void *read_server_input(void *arg)
             broadcast_question(question_id); // Use the `broadcast_question` function
             printf("Broadcasted question ID %d\n", question_id);
         }
+        else if (strcmp(command, "SELECT_MAIN_PLAYER") == 0)
+        {
+            // Gọi hàm để chọn người chơi chính
+            printf("Executing SELECT_MAIN_PLAYER command...\n");
+            select_main_player_and_broadcast();
+        }
         else
         {
             printf("Unknown command: %s\n", command);
         }
     }
 }
+
 
 void *handle_client(void *arg)
 {
