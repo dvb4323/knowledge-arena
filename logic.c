@@ -263,6 +263,9 @@ bool register_user(const char *username, const char *password)
     cJSON_AddNumberToObject(new_player, "skip_count", 0);
     cJSON_AddBoolToObject(new_player, "logged_in", false);
     cJSON_AddBoolToObject(new_player, "eliminated", false);
+    cJSON_AddNumberToObject(new_player, "elapsed_time", 0);
+    cJSON_AddBoolToObject(new_player, "answer_correct", false);
+
 
     cJSON_AddItemToArray(players_data, new_player);
 
@@ -454,7 +457,7 @@ bool validate_answer(int player_id, int question_id, int selected_option, time_t
     printf("Elapsed time: %.2f seconds\n", elapsed_time);
 
     // Update elapsed_time in players.json
-    cJSON_AddNumberToObject(player, "elapsed_time", elapsed_time);
+    cJSON_ReplaceItemInObject(player, "elapsed_time", cJSON_CreateNumber(elapsed_time));
 
     // Check if the answer is too late
     if (elapsed_time > QUESTION_TIME_LIMIT)
@@ -497,13 +500,13 @@ bool validate_answer(int player_id, int question_id, int selected_option, time_t
         cJSON *score_item = cJSON_GetObjectItem(player, "score");
         int score = score_item->valueint + 10;
         cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score));
-        cJSON_AddBoolToObject(player, "answer_correct", true);
+        cJSON_ReplaceItemInObject(player, "answer_correct", cJSON_CreateBool(true));
     }
     else
     {
         // Mark player as eliminated and set answer_correct to false
-        cJSON_AddBoolToObject(player, "answer_correct", true);
-        cJSON_AddBoolToObject(player, "answer_correct", false);
+        cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
+        cJSON_ReplaceItemInObject(player, "answer_correct", cJSON_CreateBool(false));
 
     }
 
