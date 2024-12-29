@@ -11,7 +11,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8080
+#define PORT 8081
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
@@ -405,7 +405,6 @@ void select_main_player_and_broadcast()
     cJSON_Delete(players_data);
 }
 
-
 void *read_server_input(void *arg)
 {
     while (1)
@@ -438,6 +437,67 @@ void *read_server_input(void *arg)
             printf("Unknown command: %s\n", command);
         }
     }
+}
+void check_winner_and_broadcast()
+{
+    char *data = read_file(PLAYERS_FILE);
+    if (!data)
+    {
+        perror("Failed to read players.json");
+        return;
+    }
+
+    cJSON *players_data = cJSON_Parse(data);
+    free(data);
+    if (!players_data || !cJSON_IsArray(players_data))
+    {
+        printf("Error parsing players.json.\n");
+        cJSON_Delete(players_data);
+        return;
+    }
+
+    int active_player_count = 0;
+    cJSON *winner_player = NULL;
+
+    cJSON *player = NULL;
+    cJSON_ArrayForEach(player, players_data)
+    {
+        cJSON *eliminated_item = cJSON_GetObjectItem(player, "eliminated");
+        if (eliminated_item && !cJSON_IsTrue(eliminated_item))
+        {
+            // Tăng số lượng người chơi không bị loại
+            active_player_count++;
+            winner_player = player;
+        }
+    }
+
+    if (active_player_count == 1 && winner_player)
+    {
+        cJSON *player_id_item = cJSON_GetObjectItem(winner_player, "player_id");
+        if (player_id_item && cJSON_IsNumber(player_id_item))
+        {
+            // Tạo thông báo chiến thắng
+            cJSON *response = cJSON_CreateObject();
+            cJSON_AddStringToObject(response, "type", "Game_End");
+            cJSON *data = cJSON_CreateObject();
+
+            char winner_message[100];
+            snprintf(winner_message, sizeof(winner_message), "player_id%d have a winner", player_id_item->valueint);
+
+            cJSON_AddStringToObject(data, "message", winner_message);
+            cJSON_AddNumberToObject(data, "player_id", player_id_item->valueint);
+            cJSON_AddItemToObject(response, "data", data);
+
+            char *response_str = cJSON_PrintUnformatted(response);
+            printf("Broadcasting winner: %s\n", response_str);
+            broadcast(response_str);
+
+            free(response_str);
+            cJSON_Delete(response);
+        }
+    }
+
+    cJSON_Delete(players_data);
 }
 
 
@@ -539,7 +599,7 @@ void *handle_client(void *arg)
             else
             {
                 cJSON_AddStringToObject(response, "status", "failed");
-                cJSON_AddStringToObject(response, "message", "Invalid credentials");
+                cJSON_AddStringToObject(response, "message", "account does not exist or the passeord is wrong");
             }
         }
         else if (strcmp(type, "Logout_Request") == 0)
@@ -630,7 +690,24 @@ void *handle_client(void *arg)
         }
         else if (strcmp(type, "Answer_Request") == 0)
         {
-            // cJSON_Delete(response);
+            cJSON *response = cJSON_CreateObject(); // Đảm bảo luôn tạo mới response
+            if (!data || !cJSON_IsObject(data))
+            {
+                printf("Invalid 'data' in Answer_Request.\n");
+                cJSON_AddStringToObject(response, "type", "Answer_Response");
+                cJSON_AddStringToObject(response, "status", "failed");
+                cJSON_AddStringToObject(response, "message", "Invalid request format.");
+
+                char *response_str = cJSON_PrintUnformatted(response);
+                if (response_str)
+                {
+                    send(sock, response_str, strlen(response_str), 0);
+                    free(response_str);
+                }
+                cJSON_Delete(response);
+                return NULL;
+            }
+
             cJSON *player_id_item = cJSON_GetObjectItem(data, "player_id");
             cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
             cJSON *answer_item = cJSON_GetObjectItem(data, "answer");
@@ -646,11 +723,178 @@ void *handle_client(void *arg)
                 int selected_option = answer_item->valueint;
                 int answer_time = answer_time_item->valueint;
 
+                // Cập nhật và ghi vào file
                 validate_answer(player_id, question_id, selected_option, answer_time);
-                cJSON_AddStringToObject(response, "type", "Answer_Response");
-                cJSON_AddStringToObject(response, "status", "success");
+
+                // Chờ 1 giây để đảm bảo file được ghi đầy đủ
+                sleep(1);
+
+                // Đọc lại players.json để kiểm tra answer_correct
+                char *data = read_file(PLAYERS_FILE);
+                if (data)
+                {
+                    cJSON *players_data = cJSON_Parse(data);
+                    free(data);
+
+                    cJSON *player = NULL;
+                    cJSON_ArrayForEach(player, players_data)
+                    {
+                        cJSON *id = cJSON_GetObjectItem(player, "player_id");
+                        if (id && id->valueint == player_id)
+                        {
+                            cJSON *answer_correct_item = cJSON_GetObjectItem(player, "answer_correct");
+                            if (answer_correct_item && cJSON_IsBool(answer_correct_item) && cJSON_IsTrue(answer_correct_item))
+                            {
+                                cJSON_AddStringToObject(response, "type", "Answer_Response");
+                                cJSON_AddStringToObject(response, "status", "success");
+                                cJSON_AddStringToObject(response, "message", "Correct answer! Well done.");
+                            }
+                            else
+                            {
+                                cJSON_AddStringToObject(response, "type", "Answer_Response");
+                                cJSON_AddStringToObject(response, "status", "failed");
+                                cJSON_AddStringToObject(response, "message", "Wrong answer! You have been eliminated.");
+                            }
+                            break;
+                        }
+                    }
+
+                    cJSON_Delete(players_data);
+                }
+                else
+                {
+                    cJSON_AddStringToObject(response, "status", "failed");
+                    cJSON_AddStringToObject(response, "message", "Error reading players data.");
+                }
             }
+            else
+            {
+                cJSON_AddStringToObject(response, "type", "Answer_Response");
+                cJSON_AddStringToObject(response, "status", "failed");
+                cJSON_AddStringToObject(response, "message", "Invalid request format.");
+            }
+
+            check_winner_and_broadcast();
+
+            // Gửi phản hồi lại cho client
+            char *response_str = cJSON_PrintUnformatted(response);
+            if (response_str)
+            {
+                send(sock, response_str, strlen(response_str), 0);
+                free(response_str);
+            }
+            cJSON_Delete(response);
         }
+
+        // skippppp
+        else if (strcmp(type, "Skip_Request") == 0)
+        {
+            cJSON *response = cJSON_CreateObject();
+            cJSON_AddStringToObject(response, "type", "Skip_Response");
+
+            // Kiểm tra người chơi chính và skip_count
+            FILE *file = fopen("players.json", "r");
+            if (!file)
+            {
+                cJSON_AddStringToObject(response, "status", "failed");
+                cJSON_AddStringToObject(response, "message", "Could not access player data");
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+                free(response_string);
+                cJSON_Delete(response);
+                return NULL;
+            }
+
+            fseek(file, 0, SEEK_END);
+            long file_size = ftell(file);
+            rewind(file);
+
+            char *file_content = malloc(file_size + 1);
+            fread(file_content, 1, file_size, file);
+            fclose(file);
+            file_content[file_size] = '\0';
+
+            cJSON *players_data = cJSON_Parse(file_content);
+            free(file_content);
+
+            if (!players_data || !cJSON_IsArray(players_data))
+            {
+                cJSON_AddStringToObject(response, "status", "failed");
+                cJSON_AddStringToObject(response, "message", "Invalid player data");
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+                free(response_string);
+                cJSON_Delete(response);
+                return NULL;
+            }
+
+            // Tìm người chơi chính
+            cJSON *main_player = NULL;
+            cJSON *player = NULL;
+
+            // Duyệt qua danh sách người chơi để tìm main_player
+            cJSON_ArrayForEach(player, players_data)
+            {
+                cJSON *is_main_player = cJSON_GetObjectItem(player, "main_player");
+
+                // Nếu tìm thấy main_player
+                if (cJSON_IsTrue(is_main_player))
+                {
+                    main_player = player;
+                    break;
+                }
+            }
+            if (!main_player)
+            {
+                cJSON_AddStringToObject(response, "status", "failed");
+                cJSON_AddStringToObject(response, "message", "Only the main player can skip questions.");
+                send(sock, cJSON_PrintUnformatted(response), strlen(cJSON_PrintUnformatted(response)), 0);
+                cJSON_Delete(response);
+                return NULL;
+            }
+
+            // Kiểm tra skip_count
+            cJSON *skip_count_item = cJSON_GetObjectItem(main_player, "skip_count");
+            if (!skip_count_item || skip_count_item->valueint <= 0)
+            {
+                cJSON_AddStringToObject(response, "status", "failed");
+                cJSON_AddStringToObject(response, "message", "No skip attempts remaining");
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+                free(response_string);
+                cJSON_Delete(response);
+                cJSON_Delete(players_data);
+                return NULL;
+            }
+
+            // Giảm skip_count
+            cJSON_ReplaceItemInObject(main_player, "skip_count", cJSON_CreateNumber(skip_count_item->valueint - 1));
+
+            // Lưu vào players.json
+            FILE *save_file = fopen("players.json", "w");
+            if (save_file)
+            {
+                char *updated_data = cJSON_Print(players_data);
+                fwrite(updated_data, 1, strlen(updated_data), save_file);
+                fclose(save_file);
+                free(updated_data);
+            }
+
+            cJSON *updated_skip_count_item = cJSON_GetObjectItem(main_player, "skip_count");
+            if (updated_skip_count_item && cJSON_IsNumber(updated_skip_count_item))
+            {
+                cJSON_AddStringToObject(response, "status", "success");
+                cJSON_AddNumberToObject(response, "skip_count_remaining", updated_skip_count_item->valueint);
+            }
+
+            char *response_string = cJSON_PrintUnformatted(response);
+            send(sock, response_string, strlen(response_string), 0);
+
+            free(response_string);
+            cJSON_Delete(response);
+            cJSON_Delete(players_data);
+        }
+
         else
         {
             cJSON_AddStringToObject(response, "status", "failed");
