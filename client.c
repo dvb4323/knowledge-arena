@@ -78,6 +78,18 @@ void send_answer(int sock, int question_id, int answer)
     cJSON_Delete(response);
 }
 
+// Function to send a skip request to the server
+void send_skip_request(int sock)
+{
+    cJSON *skip_request = cJSON_CreateObject();
+    cJSON_AddStringToObject(skip_request, "type", "Skip_Request");
+    char *request_string = cJSON_PrintUnformatted(skip_request);
+    send(sock, request_string, strlen(request_string), 0);
+    printf("Sent skip request to server.\n");
+    free(request_string);
+    cJSON_Delete(skip_request);
+}
+
 // Function to process server messages
 void process_server_message(char *buffer)
 {
@@ -107,7 +119,27 @@ void process_server_message(char *buffer)
     else if (strcmp(type, "Question_Broadcast") == 0)
     {
         cJSON *data = cJSON_GetObjectItem(message, "data");
-        int new_question_id = cJSON_GetObjectItem(data, "question_id")->valueint;
+        if (!data || !cJSON_IsObject(data))
+        {
+            printf("Invalid or missing data in Question_Broadcast.\n");
+            cJSON_Delete(message);
+            return;
+        }
+
+        cJSON *question_id_item = cJSON_GetObjectItem(data, "question_id");
+        cJSON *question_text_item = cJSON_GetObjectItem(data, "question_text");
+        cJSON *options = cJSON_GetObjectItem(data, "options");
+
+        if (!question_id_item || !cJSON_IsNumber(question_id_item) ||
+            !question_text_item || !cJSON_IsString(question_text_item) ||
+            !options || !cJSON_IsArray(options))
+        {
+            printf("Invalid question data in Question_Broadcast.\n");
+            cJSON_Delete(message);
+            return;
+        }
+
+        int new_question_id = question_id_item->valueint;
 
         if (current_question_id == new_question_id)
         {
@@ -117,24 +149,76 @@ void process_server_message(char *buffer)
         }
 
         current_question_id = new_question_id;
-        const char *question_text = cJSON_GetObjectItem(data, "question_text")->valuestring;
-        cJSON *options = cJSON_GetObjectItem(data, "options");
+        const char *question_text = question_text_item->valuestring;
 
         printf("Question ID: %d\n", current_question_id);
         printf("Question: %s\n", question_text);
         for (int i = 0; i < cJSON_GetArraySize(options); i++)
         {
-            printf("%d. %s\n", i + 1, cJSON_GetArrayItem(options, i)->valuestring);
+            cJSON *option = cJSON_GetArrayItem(options, i);
+            if (option && cJSON_IsString(option))
+            {
+                printf("%d. %s\n", i + 1, option->valuestring);
+            }
         }
         waiting_for_answer = 1;
     }
     else if (strcmp(type, "Answer_Response") == 0)
     {
-        const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
+        cJSON *status_item = cJSON_GetObjectItem(message, "status");
+        cJSON *message_item = cJSON_GetObjectItem(message, "message");
+
+        if (!status_item || !cJSON_IsString(status_item))
+        {
+            printf("Invalid 'status' in Answer_Response.\n");
+            cJSON_Delete(message);
+            return;
+        }
+
+        const char *status = status_item->valuestring;
         printf("Answer status: %s\n", status);
+
+        if (message_item && cJSON_IsString(message_item))
+        {
+            printf("%s\n", message_item->valuestring);
+        }
+
         if (strcmp(status, "success") == 0)
         {
             waiting_for_answer = 0; // Reset state
+        }
+    }
+
+    else if (strcmp(type, "Skip_Response") == 0)
+    {
+        const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
+        if (strcmp(status, "success") == 0)
+        {
+            int remaining_skips = cJSON_GetObjectItem(message, "skip_count_remaining")->valueint;
+            printf("Skip successful. Skip count left: %d\n", remaining_skips);
+        }
+        else
+        {
+            const char *message_text = cJSON_GetObjectItem(message, "message")->valuestring;
+            printf("Skip failed: %s\n", message_text ? message_text : "Unknown error.");
+        }
+    }
+    else if (strcmp(type, "Game_End") == 0)
+    {
+        cJSON *data = cJSON_GetObjectItem(message, "data");
+        const char *message_text = cJSON_GetObjectItem(data, "message")->valuestring;
+        int winner_id = cJSON_GetObjectItem(data, "player_id")->valueint;
+
+        printf("Game over: %s\n", message_text);
+        printf("Winner is player_id%d\n", winner_id);
+
+        if (winner_id == player_id)
+        {
+            printf("Congratulations! You are the winner!\n");
+        }
+        else
+        {
+            printf("Better luck next time!\n");
         }
     }
 
@@ -209,28 +293,37 @@ int main()
         // Check if there is user input
         if (FD_ISSET(STDIN_FILENO, &read_fds))
         {
+            char command[20]; // Khai báo biến command trong vòng lặp
             if (waiting_for_answer)
             {
-                int answer;
-                if (scanf("%d", &answer) == 1)
+                printf("Enter your answer: ");
+                scanf("%s", command);
+
+                if (strcmp(command, "SKIP") == 0)
                 {
-                    send_answer(sock, current_question_id, answer);
+                    send_skip_request(sock);
                 }
                 else
                 {
-                    printf("Invalid input. Please enter a number.\n");
-                    while (getchar() != '\n')
-                        ; // Clear input buffer
+                    int answer = atoi(command);
+                    if (answer > 0)
+                    {
+                        send_answer(sock, current_question_id, answer);
+                    }
+                    else
+                    {
+                        printf("Invalid input. Please enter a number.\n");
+                    }
                 }
             }
             else
             {
-                char command[20], username[50], password[50];
                 printf("Enter command (REGISTER/LOGIN/LOGOUT): ");
                 scanf("%s", command);
 
                 if (strcmp(command, "REGISTER") == 0 || strcmp(command, "LOGIN") == 0)
                 {
+                    char username[50], password[50];
                     printf("Enter username: ");
                     scanf("%s", username);
                     printf("Enter password: ");
@@ -242,6 +335,10 @@ int main()
                 {
                     send_request(sock, "Logout_Request", NULL, NULL);
                 }
+                else if (strcmp(command, "SKIP") == 0)
+                {
+                    send_skip_request(sock);
+                }
                 else
                 {
                     printf("Invalid command.\n");
@@ -249,7 +346,6 @@ int main()
             }
         }
     }
-
     close(sock);
     return 0;
 }
