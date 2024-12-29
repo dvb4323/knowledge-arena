@@ -23,7 +23,10 @@ cJSON *players_data = NULL;
 pthread_mutex_t clients_lock = PTHREAD_MUTEX_INITIALIZER; // Mutex to protect player data
 pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t command_cond = PTHREAD_COND_INITIALIZER;
+
 int start_game_flag = 0; // Flag to indicate when START_GAME is triggered
+int total_answers_received = 0;
+int total_active_players = 0;
 
 void broadcast(const char *message)
 {
@@ -98,6 +101,10 @@ void broadcast(const char *message)
 // Send questions
 void broadcast_question(int question_id)
 {
+    // Reset counters
+    total_active_players = 0;
+    total_answers_received = 0;
+    
     // Load the question
     cJSON *original_question = get_question_by_id(question_id);
     if (!original_question)
@@ -151,6 +158,7 @@ void broadcast_question(int question_id)
         if (cJSON_IsTrue(logged_in) && !cJSON_IsTrue(eliminated))
         {
             // Add or update question_start_time
+            total_active_players++;
             cJSON *start_time = cJSON_GetObjectItem(player, "question_start_time");
             if (!start_time) // If the field does not exist, add it
             {
@@ -725,6 +733,12 @@ void *handle_client(void *arg)
 
                 // Cập nhật và ghi vào file
                 validate_answer(player_id, question_id, selected_option, answer_time);
+
+                if (total_answers_received >= total_active_players)
+                {
+                    // Call the function to calculate scores
+                    update_main_player_score();
+                }
 
                 // Chờ 1 giây để đảm bảo file được ghi đầy đủ
                 sleep(1);
