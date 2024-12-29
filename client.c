@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/select.h>
+#include <time.h>
 #include "cJSON.h"
 
 #define SERVER_IP "127.0.0.1"
@@ -45,21 +46,48 @@ void send_answer(int sock, int question_id, int answer)
         return;
     }
 
-    cJSON *response = cJSON_CreateObject();
-    cJSON_AddStringToObject(response, "type", "Answer_Response");
+    // Get the current timestamp (Unix time)
+    time_t current_time = time(NULL);
+    if (current_time == -1)
+    {
+        printf("Error: Unable to get the current time.\n");
+        return;
+    }
 
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "type", "Answer_Request");
+
+    // Prepare the data object
     cJSON *data = cJSON_CreateObject();
     cJSON_AddNumberToObject(data, "player_id", player_id);
     cJSON_AddNumberToObject(data, "question_id", question_id);
     cJSON_AddNumberToObject(data, "answer", answer);
+
+    // Add the timestamp to the data object
+    cJSON_AddNumberToObject(data, "timestamp", (int)current_time);
+
     cJSON_AddItemToObject(response, "data", data);
 
+    // Send the answer request to the server
     char *json_message = cJSON_PrintUnformatted(response);
     send(sock, json_message, strlen(json_message), 0);
     printf("Sent to server: %s\n", json_message);
 
+    // Clean up
     free(json_message);
     cJSON_Delete(response);
+}
+
+// Function to send a skip request to the server
+void send_skip_request(int sock)
+{
+    cJSON *skip_request = cJSON_CreateObject();
+    cJSON_AddStringToObject(skip_request, "type", "Skip_Request");
+    char *request_string = cJSON_PrintUnformatted(skip_request);
+    send(sock, request_string, strlen(request_string), 0);
+    printf("Sent skip request to server.\n");
+    free(request_string);
+    cJSON_Delete(skip_request);
 }
 
 // Function to process server messages
@@ -74,7 +102,7 @@ void process_server_message(char *buffer)
 
     const char *type = cJSON_GetObjectItem(message, "type")->valuestring;
 
-    if (strcmp(type, "Login_Request") == 0)
+    if (strcmp(type, "Login_Response") == 0)
     {
         const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
         if (strcmp(status, "success") == 0)
@@ -121,6 +149,21 @@ void process_server_message(char *buffer)
             waiting_for_answer = 0; // Reset state
         }
     }
+    else if (strcmp(type, "Skip_Response") == 0)
+    {
+        const char *status = cJSON_GetObjectItem(message, "status")->valuestring;
+        if (strcmp(status, "success") == 0)
+        {
+            int remaining_skips = cJSON_GetObjectItem(message, "skip_count_remaining")->valueint;
+            printf("Skip successful. Skip count left: %d\n", remaining_skips);
+        }
+        else
+        {
+            const char *message_text = cJSON_GetObjectItem(message, "message")->valuestring;
+            printf("Skip failed: %s\n", message_text ? message_text : "Unknown error.");
+        }
+    }
+
 
     cJSON_Delete(message);
 }
@@ -159,81 +202,93 @@ int main()
 
     // Main loop
     while (1)
+{
+    FD_ZERO(&read_fds);
+    FD_SET(sock, &read_fds);
+    FD_SET(STDIN_FILENO, &read_fds);
+
+    int max_fd = sock > STDIN_FILENO ? sock : STDIN_FILENO;
+
+    if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0)
     {
-        FD_ZERO(&read_fds);
-        FD_SET(sock, &read_fds);
-        FD_SET(STDIN_FILENO, &read_fds);
+        perror("select error");
+        break;
+    }
 
-        int max_fd = sock > STDIN_FILENO ? sock : STDIN_FILENO;
-
-        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0)
+    // Check if there is data from the server
+    if (FD_ISSET(sock, &read_fds))
+    {
+        memset(buffer, 0, sizeof(buffer)); // Clear the buffer before receiving new data
+        int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_received > 0)
         {
-            perror("select error");
+            buffer[bytes_received] = '\0';
+            printf("\nMessage from server: %s\n", buffer);
+            process_server_message(buffer);
+        }
+        else if (bytes_received == 0)
+        {
+            printf("Server disconnected.\n");
             break;
         }
+    }
 
-        // Check if there is data from the server
-        if (FD_ISSET(sock, &read_fds))
+    // Check if there is user input
+    if (FD_ISSET(STDIN_FILENO, &read_fds))
+    {
+        char command[20]; // Khai báo biến command trong vòng lặp
+        if (waiting_for_answer)
         {
-            memset(buffer, 0, sizeof(buffer)); // Clear the buffer before receiving new data
-            int bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
-            if (bytes_received > 0)
-            {
-                buffer[bytes_received] = '\0';
-                printf("\nMessage from server: %s\n", buffer);
-                process_server_message(buffer);
-            }
-            else if (bytes_received == 0)
-            {
-                printf("Server disconnected.\n");
-                break;
-            }
-        }
+            printf("Enter your answer: ");
+            scanf("%s", command);
 
-        // Check if there is user input
-        if (FD_ISSET(STDIN_FILENO, &read_fds))
-        {
-            if (waiting_for_answer)
+            if (strcmp(command, "SKIP") == 0)
             {
-                int answer;
-                if (scanf("%d", &answer) == 1)
+                send_skip_request(sock);
+            }
+            else
+            {
+                int answer = atoi(command);
+                if (answer > 0)
                 {
                     send_answer(sock, current_question_id, answer);
                 }
                 else
                 {
                     printf("Invalid input. Please enter a number.\n");
-                    while (getchar() != '\n')
-                        ; // Clear input buffer
-                }
-            }
-            else
-            {
-                char command[20], username[50], password[50];
-                printf("Enter command (REGISTER/LOGIN/LOGOUT): ");
-                scanf("%s", command);
-
-                if (strcmp(command, "REGISTER") == 0 || strcmp(command, "LOGIN") == 0)
-                {
-                    printf("Enter username: ");
-                    scanf("%s", username);
-                    printf("Enter password: ");
-                    scanf("%s", password);
-
-                    send_request(sock, strcmp(command, "REGISTER") == 0 ? "Register_Request" : "Login_Request", username, password);
-                }
-                else if (strcmp(command, "LOGOUT") == 0)
-                {
-                    send_request(sock, "Logout_Request", NULL, NULL);
-                }
-                else
-                {
-                    printf("Invalid command.\n");
                 }
             }
         }
-    }
+        else
+        {
+            printf("Enter command (REGISTER/LOGIN/LOGOUT): ");
+            scanf("%s", command);
 
-    close(sock);
-    return 0;
+            if (strcmp(command, "REGISTER") == 0 || strcmp(command, "LOGIN") == 0)
+            {
+                char username[50], password[50];
+                printf("Enter username: ");
+                scanf("%s", username);
+                printf("Enter password: ");
+                scanf("%s", password);
+
+                send_request(sock, strcmp(command, "REGISTER") == 0 ? "Register_Request" : "Login_Request", username, password);
+            }
+            else if (strcmp(command, "LOGOUT") == 0)
+            {
+                send_request(sock, "Logout_Request", NULL, NULL);
+            }
+            else if (strcmp(command, "SKIP") == 0)
+            {
+                send_skip_request(sock);
+            }
+            else
+            {
+                printf("Invalid command.\n");
+            }
+        }
+    }
+}
+close(sock);
+return 0;
 }
