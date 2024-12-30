@@ -3,11 +3,13 @@
     "username": "ABC",
     "password": "123",
     "player_id": 1,
-    "score": 80,
-    "main_player": false,
+    "score": 0,
+    "main_player": true,
     "skip_count": 0,
     "logged_in": false,
-    "eliminated": false
+    "eliminated": false,
+    "elapsed_time": 0,
+    "answer_correct": false
   },
   {
     "username": "DEF",
@@ -17,6 +19,32 @@
     "main_player": false,
     "skip_count": 0,
     "logged_in": false,
-    "eliminated": false
+    "eliminated": false,
+    "elapsed_time": 0,
+    "answer_correct": false
+  },
+  {
+    "username": "BI",
+    "password": "123",
+    "player_id": 3,
+    "score": 0,
+    "main_player": false,
+    "skip_count": 0,
+    "logged_in": false,
+    "eliminated": false,
+    "elapsed_time": 0,
+    "answer_correct": false
+  },
+  {
+    "username": "BA",
+    "password": "123",
+    "player_id": 4,
+    "score": 0,
+    "main_player": false,
+    "skip_count": 0,
+    "logged_in": false,
+    "eliminated": false,
+    "elapsed_time": 0,
+    "answer_correct": false
   }
 ]
