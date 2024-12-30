@@ -11,7 +11,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8080
+#define PORT 8081
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
@@ -23,10 +23,7 @@ cJSON *players_data = NULL;
 pthread_mutex_t clients_lock = PTHREAD_MUTEX_INITIALIZER; // Mutex to protect player data
 pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t command_cond = PTHREAD_COND_INITIALIZER;
-
 int start_game_flag = 0; // Flag to indicate when START_GAME is triggered
-int total_answers_received = 0;
-int total_active_players = 0;
 
 void broadcast(const char *message)
 {
@@ -50,61 +47,11 @@ void broadcast(const char *message)
     pthread_mutex_unlock(&clients_lock);
 }
 
-// void broadcast_question(int question_id)
-// {
-//     cJSON *original_question = get_question_by_id(question_id);
-//     if (!original_question)
-//     {
-//         printf("Question with ID %d not found.\n", question_id);
-//         return;
-//     }
 
-//     // Get the current timestamp as the question start time
-//     time_t current_time = time(NULL);
-//     if (current_time == -1)
-//     {
-//         printf("Error: Unable to get the current time.\n");
-//         return;
-//     }
-
-//     // Update the start time for all players in players.json
-
-//     // Create a custom JSON object for broadcasting
-//     cJSON *broadcast_message = cJSON_CreateObject();
-//     cJSON_AddStringToObject(broadcast_message, "type", "Question_Broadcast");
-
-//     cJSON *data = cJSON_CreateObject();
-//     cJSON_AddNumberToObject(data, "question_id", question_id);
-
-//     cJSON *question_text = cJSON_GetObjectItem(original_question, "question");
-//     if (question_text && cJSON_IsString(question_text))
-//     {
-//         cJSON_AddStringToObject(data, "question_text", question_text->valuestring);
-//     }
-
-//     cJSON *options = cJSON_GetObjectItem(original_question, "options");
-//     if (options && cJSON_IsArray(options))
-//     {
-//         cJSON_AddItemToObject(data, "options", cJSON_Duplicate(options, 1)); // Deep copy the options array
-//     }
-
-//     cJSON_AddItemToObject(broadcast_message, "data", data);
-
-//     // Convert to string and broadcast
-//     char *message_str = cJSON_PrintUnformatted(broadcast_message);
-//     broadcast(message_str); // Use the existing `broadcast` function to send to all clients
-
-//     free(message_str);
-//     cJSON_Delete(broadcast_message);
-// }
 
 // Send questions
 void broadcast_question(int question_id)
 {
-    // Reset counters
-    total_active_players = 0;
-    total_answers_received = 0;
-    
     // Load the question
     cJSON *original_question = get_question_by_id(question_id);
     if (!original_question)
@@ -158,7 +105,6 @@ void broadcast_question(int question_id)
         if (cJSON_IsTrue(logged_in) && !cJSON_IsTrue(eliminated))
         {
             // Add or update question_start_time
-            total_active_players++;
             cJSON *start_time = cJSON_GetObjectItem(player, "question_start_time");
             if (!start_time) // If the field does not exist, add it
             {
@@ -215,39 +161,7 @@ void broadcast_question(int question_id)
     free(message_str);
     cJSON_Delete(broadcast_message);
 
-    // Handling questions for non_eliminated
-    // Broadcast the question only to non-eliminated and logged-in players
-    // cJSON *player;
-    // cJSON_ArrayForEach(player, players_data)
-    // {
-    //     // Check if the player is logged in and not eliminated
-    //     cJSON *logged_in = cJSON_GetObjectItem(player, "logged_in");
-    //     cJSON *eliminated = cJSON_GetObjectItem(player, "eliminated");
-    //     cJSON *socket_item = cJSON_GetObjectItem(player, "socket");
-
-    //     if (!cJSON_IsTrue(logged_in) || cJSON_IsTrue(eliminated) || !cJSON_IsNumber(socket_item))
-    //     {
-    //         continue; // Skip players who are not eligible
-    //     }
-
-    //     int sock = socket_item->valueint;
-
-    //     // Ensure the socket descriptor is valid before sending
-    //     if (sock > 0)
-    //     {
-    //         if (send(sock, message_str, strlen(message_str), 0) == -1)
-    //         {
-    //             perror("Failed to send question to player");
-    //         }
-    //     }
-    // }
-
-    // // Cleanup
-    // free(message_str);
-    // cJSON_Delete(broadcast_message);
-    // cJSON_Delete(players_data);
-
-    // printf("Broadcasted question ID %d to active players.\n", question_id);
+    
 }
 
 void *game_controller(void *arg)
@@ -607,7 +521,7 @@ void *handle_client(void *arg)
             else
             {
                 cJSON_AddStringToObject(response, "status", "failed");
-                cJSON_AddStringToObject(response, "message", "account does not exist or the password is wrong");
+                cJSON_AddStringToObject(response, "message", "account does not exist or the passeord is wrong");
             }
         }
         else if (strcmp(type, "Logout_Request") == 0)
@@ -624,7 +538,7 @@ void *handle_client(void *arg)
                 {
                     fprintf(stderr, "Failed to open players.json for reading.\n");
                     cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Failed to open players.json for reading.");
+                    cJSON_AddStringToObject(response, "message", "Internal error");
                     break;
                 }
 
@@ -644,7 +558,7 @@ void *handle_client(void *arg)
                 {
                     fprintf(stderr, "Failed to parse players.json.\n");
                     cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Failed to parse players.json.");
+                    cJSON_AddStringToObject(response, "message", "Internal error");
                     break;
                 }
 
@@ -677,7 +591,7 @@ void *handle_client(void *arg)
                     fprintf(stderr, "Failed to save updated players data.\n");
                     cJSON_Delete(players_data);
                     cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Failed to save updated players data.");
+                    cJSON_AddStringToObject(response, "message", "Internal error");
                     break;
                 }
 
@@ -733,12 +647,6 @@ void *handle_client(void *arg)
 
                 // Cập nhật và ghi vào file
                 validate_answer(player_id, question_id, selected_option, answer_time);
-
-                if (total_answers_received >= total_active_players)
-                {
-                    // Call the function to calculate scores
-                    update_main_player_score();
-                }
 
                 // Chờ 1 giây để đảm bảo file được ghi đầy đủ
                 sleep(1);
