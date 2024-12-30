@@ -11,7 +11,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8081
+#define PORT 8080
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
@@ -607,7 +607,7 @@ void *handle_client(void *arg)
             else
             {
                 cJSON_AddStringToObject(response, "status", "failed");
-                cJSON_AddStringToObject(response, "message", "account does not exist or the passeord is wrong");
+                cJSON_AddStringToObject(response, "message", "account does not exist or the password is wrong");
             }
         }
         else if (strcmp(type, "Logout_Request") == 0)
@@ -624,7 +624,7 @@ void *handle_client(void *arg)
                 {
                     fprintf(stderr, "Failed to open players.json for reading.\n");
                     cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Internal error");
+                    cJSON_AddStringToObject(response, "message", "Failed to open players.json for reading.");
                     break;
                 }
 
@@ -644,7 +644,7 @@ void *handle_client(void *arg)
                 {
                     fprintf(stderr, "Failed to parse players.json.\n");
                     cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Internal error");
+                    cJSON_AddStringToObject(response, "message", "Failed to parse players.json.");
                     break;
                 }
 
@@ -677,7 +677,7 @@ void *handle_client(void *arg)
                     fprintf(stderr, "Failed to save updated players data.\n");
                     cJSON_Delete(players_data);
                     cJSON_AddStringToObject(response, "status", "failed");
-                    cJSON_AddStringToObject(response, "message", "Internal error");
+                    cJSON_AddStringToObject(response, "message", "Failed to save updated players data.");
                     break;
                 }
 
