@@ -16,5 +16,145 @@
     "question": "Which programming language is known as the 'Mother of All Languages'?",
     "options": ["C", "Python", "Java", "Assembly"],
     "correct_option": 1
+  },
+  {
+    "id": 4,
+    "question": "Who painted the Mona Lisa?",
+    "options": ["Michelangelo", "Leonardo da Vinci", "Raphael", "Donatello"],
+    "correct_option": 2
+  },
+  {
+    "id": 5,
+    "question": "What is the largest planet in our solar system?",
+    "options": ["Earth", "Mars", "Jupiter", "Saturn"],
+    "correct_option": 3
+  },
+  {
+    "id": 6,
+    "question": "In which year did World War II end?",
+    "options": ["1942", "1944", "1945", "1948"],
+    "correct_option": 3
+  },
+  {
+    "id": 7,
+    "question": "What is the chemical symbol for gold?",
+    "options": ["Ag", "Au", "Fe", "Hg"],
+    "correct_option": 2
+  },
+  {
+    "id": 8,
+    "question": "Who wrote the play 'Hamlet'?",
+    "options": [
+      "Charles Dickens",
+      "Jane Austen",
+      "William Shakespeare",
+      "Mark Twain"
+    ],
+    "correct_option": 3
+  },
+  {
+    "id": 9,
+    "question": "What is the tallest mammal on Earth?",
+    "options": ["Giraffe", "Elephant", "Lion", "Zebra"],
+    "correct_option": 1
+  },
+  {
+    "id": 10,
+    "question": "Which country is known as the 'Land of the Rising Sun'?",
+    "options": ["China", "India", "Japan", "South Korea"],
+    "correct_option": 3
+  },
+  {
+    "id": 11,
+    "question": "What is the square root of 144?",
+    "options": ["10", "11", "12", "13"],
+    "correct_option": 3
+  },
+  {
+    "id": 12,
+    "question": "Which ocean is the largest?",
+    "options": ["Atlantic", "Pacific", "Indian", "Arctic"],
+    "correct_option": 2
+  },
+  {
+    "id": 13,
+    "question": "Who invented the light bulb?",
+    "options": [
+      "Thomas Edison",
+      "Nikola Tesla",
+      "Albert Einstein",
+      "Marie Curie"
+    ],
+    "correct_option": 1
+  },
+  {
+    "id": 14,
+    "question": "What is the currency of Japan?",
+    "options": ["Yuan", "Rupee", "Yen", "Won"],
+    "correct_option": 3
+  },
+  {
+    "id": 15,
+    "question": "How many bones are in the human body?",
+    "options": ["206", "250", "300", "350"],
+    "correct_option": 1
+  },
+  {
+    "id": 16,
+    "question": "Which animal is the national symbol of the United States?",
+    "options": ["Eagle", "Bear", "Lion", "Wolf"],
+    "correct_option": 1
+  },
+  {
+    "id": 17,
+    "question": "What is the chemical symbol for water?",
+    "options": ["H2O", "CO2", "O2", "N2"],
+    "correct_option": 1
+  },
+  {
+    "id": 18,
+    "question": "Who was the first president of the United States?",
+    "options": [
+      "George Washington",
+      "Thomas Jefferson",
+      "Abraham Lincoln",
+      "John Adams"
+    ],
+    "correct_option": 1
+  },
+  {
+    "id": 19,
+    "question": "What is the tallest mountain in the world?",
+    "options": [
+      "Mount Everest",
+      "Mount Kilimanjaro",
+      "Mount Fuji",
+      "Mount McKinley"
+    ],
+    "correct_option": 1
+  },
+  {
+    "id": 20,
+    "question": "Which planet is closest to the Sun?",
+    "options": ["Earth", "Mars", "Mercury", "Venus"],
+    "correct_option": 3
+  },
+  {
+    "id": 21,
+    "question": "What is the capital of Italy?",
+    "options": ["Milan", "Venice", "Rome", "Florence"],
+    "correct_option": 3
+  },
+  {
+    "id": 22,
+    "question": "What is 5 x 5?",
+    "options": ["20", "25", "30", "35"],
+    "correct_option": 2
+  },
+  {
+    "id": 23,
+    "question": "Which programming language is often used for web development?",
+    "options": ["C++", "Java", "JavaScript", "Python"],
+    "correct_option": 3
   }
 ]
