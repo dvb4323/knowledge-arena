@@ -55,4 +55,7 @@ void broadcast_question(int question_id);
 // Update main player score
 void update_main_player_score();
 
+// Check Winner
+void check_winner_and_broadcast();
+
 #endif // LOGIC_H
