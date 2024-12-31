@@ -11,7 +11,7 @@
 #include "logic.h"
 #include "cJSON.h"
 
-#define PORT 8081
+#define PORT 8080
 #define MAX_CLIENTS 100
 #define BUFFER_SIZE 1024
 
@@ -23,7 +23,10 @@ cJSON *players_data = NULL;
 pthread_mutex_t clients_lock = PTHREAD_MUTEX_INITIALIZER; // Mutex to protect player data
 pthread_mutex_t command_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t command_cond = PTHREAD_COND_INITIALIZER;
+
 int start_game_flag = 0; // Flag to indicate when START_GAME is triggered
+int total_answers_received = 0;
+int total_active_players = 0;
 
 void broadcast(const char *message)
 {
@@ -47,11 +50,11 @@ void broadcast(const char *message)
     pthread_mutex_unlock(&clients_lock);
 }
 
-
-
 // Send questions
 void broadcast_question(int question_id)
 {
+    total_active_players = 0;
+    total_answers_received = 0;
     // Load the question
     cJSON *original_question = get_question_by_id(question_id);
     if (!original_question)
@@ -105,6 +108,7 @@ void broadcast_question(int question_id)
         if (cJSON_IsTrue(logged_in) && !cJSON_IsTrue(eliminated))
         {
             // Add or update question_start_time
+            total_active_players++;
             cJSON *start_time = cJSON_GetObjectItem(player, "question_start_time");
             if (!start_time) // If the field does not exist, add it
             {
@@ -160,8 +164,6 @@ void broadcast_question(int question_id)
 
     free(message_str);
     cJSON_Delete(broadcast_message);
-
-    
 }
 
 void *game_controller(void *arg)
@@ -385,7 +387,8 @@ void check_winner_and_broadcast()
     cJSON_ArrayForEach(player, players_data)
     {
         cJSON *eliminated_item = cJSON_GetObjectItem(player, "eliminated");
-        if (eliminated_item && !cJSON_IsTrue(eliminated_item))
+        cJSON *is_logged_in = cJSON_GetObjectItem(player, "logged_in");
+        if (eliminated_item && !cJSON_IsTrue(eliminated_item) && cJSON_IsTrue(is_logged_in))
         {
             // Tăng số lượng người chơi không bị loại
             active_player_count++;
@@ -422,7 +425,6 @@ void check_winner_and_broadcast()
     cJSON_Delete(players_data);
 }
 
-
 void *handle_client(void *arg)
 {
     int sock = *(int *)arg;
@@ -458,11 +460,23 @@ void *handle_client(void *arg)
             {
                 cJSON_AddStringToObject(response, "status", "success");
                 cJSON_AddStringToObject(response, "message", "Registration successful");
+
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+
+                free(response_string);
+                cJSON_Delete(response);
             }
             else
             {
                 cJSON_AddStringToObject(response, "status", "failed");
                 cJSON_AddStringToObject(response, "message", "User already exists");
+
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+
+                free(response_string);
+                cJSON_Delete(response);
             }
         }
         else if (strcmp(type, "Login_Request") == 0)
@@ -517,11 +531,23 @@ void *handle_client(void *arg)
 
                 // Add player_id to the response
                 cJSON_AddNumberToObject(response, "player_id", player_id);
+
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+
+                free(response_string);
+                cJSON_Delete(response);
             }
             else
             {
                 cJSON_AddStringToObject(response, "status", "failed");
-                cJSON_AddStringToObject(response, "message", "account does not exist or the passeord is wrong");
+                cJSON_AddStringToObject(response, "message", "account does not exist or the password is wrong");
+
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+
+                free(response_string);
+                cJSON_Delete(response);
             }
         }
         else if (strcmp(type, "Logout_Request") == 0)
@@ -603,11 +629,23 @@ void *handle_client(void *arg)
                 // Send success response
                 cJSON_AddStringToObject(response, "status", "success");
                 cJSON_AddStringToObject(response, "message", "Logout successful");
+
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+
+                free(response_string);
+                cJSON_Delete(response);
             }
             else
             {
                 cJSON_AddStringToObject(response, "status", "failed");
                 cJSON_AddStringToObject(response, "message", "Not logged in");
+
+                char *response_string = cJSON_PrintUnformatted(response);
+                send(sock, response_string, strlen(response_string), 0);
+
+                free(response_string);
+                cJSON_Delete(response);
             }
         }
         else if (strcmp(type, "Answer_Request") == 0)
@@ -648,6 +686,11 @@ void *handle_client(void *arg)
                 // Cập nhật và ghi vào file
                 validate_answer(player_id, question_id, selected_option, answer_time);
 
+                if (total_answers_received >= total_active_players)
+                {
+                    update_main_player_score();
+                }
+
                 // Chờ 1 giây để đảm bảo file được ghi đầy đủ
                 sleep(1);
 
@@ -665,6 +708,7 @@ void *handle_client(void *arg)
                         if (id && id->valueint == player_id)
                         {
                             cJSON *answer_correct_item = cJSON_GetObjectItem(player, "answer_correct");
+                            cJSON *score_item = cJSON_GetObjectItem(player, "score");
                             if (answer_correct_item && cJSON_IsBool(answer_correct_item) && cJSON_IsTrue(answer_correct_item))
                             {
                                 cJSON_AddStringToObject(response, "type", "Answer_Response");
@@ -676,6 +720,10 @@ void *handle_client(void *arg)
                                 cJSON_AddStringToObject(response, "type", "Answer_Response");
                                 cJSON_AddStringToObject(response, "status", "failed");
                                 cJSON_AddStringToObject(response, "message", "Wrong answer! You have been eliminated.");
+                            }
+                            if (score_item && cJSON_IsNumber(score_item))
+                            {
+                                cJSON_AddNumberToObject(response, "score", score_item->valueint);
                             }
                             break;
                         }
@@ -696,7 +744,7 @@ void *handle_client(void *arg)
                 cJSON_AddStringToObject(response, "message", "Invalid request format.");
             }
 
-            check_winner_and_broadcast();
+            // check_winner_and_broadcast();
 
             // Gửi phản hồi lại cho client
             char *response_str = cJSON_PrintUnformatted(response);
@@ -705,6 +753,9 @@ void *handle_client(void *arg)
                 send(sock, response_str, strlen(response_str), 0);
                 free(response_str);
             }
+
+            check_winner_and_broadcast();
+
             cJSON_Delete(response);
         }
 
@@ -821,13 +872,13 @@ void *handle_client(void *arg)
         {
             cJSON_AddStringToObject(response, "status", "failed");
             cJSON_AddStringToObject(response, "message", "Unknown command");
+            char *response_string = cJSON_PrintUnformatted(response);
+            send(sock, response_string, strlen(response_string), 0);
+
+            free(response_string);
+            cJSON_Delete(response);
         }
 
-        char *response_string = cJSON_PrintUnformatted(response);
-        send(sock, response_string, strlen(response_string), 0);
-
-        free(response_string);
-        cJSON_Delete(response);
         cJSON_Delete(request);
         memset(buffer, 0, sizeof(buffer));
     }
