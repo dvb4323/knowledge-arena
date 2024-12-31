@@ -17,7 +17,6 @@ static cJSON *questions = NULL;
 extern cJSON *players_data;
 extern int total_answers_received;
 extern int total_active_players;
-extern pthread_mutex_t answer_mutex;
 
 // Read entire file into memory
 char *read_file(const char *filename)
@@ -572,10 +571,28 @@ void update_main_player_score()
     }
 
     int main_player_id = -1;
-    int bonus_points = 0;
+    int main_player_score = 0;
 
     // Debug log
     printf("Calculating scores...\n");
+
+    // Find the main player and get their current score
+    for (int i = 0; i < cJSON_GetArraySize(players); i++)
+    {
+        cJSON *player = cJSON_GetArrayItem(players, i);
+
+        bool is_logged_in = cJSON_IsTrue(cJSON_GetObjectItem(player, "logged_in"));
+        bool is_main = cJSON_IsTrue(cJSON_GetObjectItem(player, "main_player"));
+
+        if (is_logged_in && is_main)
+        {
+            main_player_id = cJSON_GetObjectItem(player, "player_id")->valueint;
+            main_player_score = cJSON_GetObjectItem(player, "score")->valueint;
+            break;
+        }
+    }
+
+    int total_transferred_points = 0;
 
     // Calculate bonuses based on current answer results
     for (int i = 0; i < cJSON_GetArraySize(players); i++)
@@ -587,25 +604,28 @@ void update_main_player_score()
         bool is_correct = cJSON_IsTrue(cJSON_GetObjectItem(player, "answer_correct"));
         bool is_eliminated = cJSON_IsTrue(cJSON_GetObjectItem(player, "eliminated"));
 
-        // Skip players not logged in
-        if (!is_logged_in)
+        if (!is_logged_in || is_main)
         {
+            // Skip main player and players not logged in
             continue;
         }
 
         int player_id = cJSON_GetObjectItem(player, "player_id")->valueint;
+        int player_score = cJSON_GetObjectItem(player, "score")->valueint;
 
         printf("Player %d -> correct: %d, eliminated: %d\n", player_id, is_correct, is_eliminated);
 
-        if (is_main)
+        if (!is_correct && is_logged_in)
         {
-            main_player_id = player_id; // Save main player ID
-        }
-        // else if (!is_correct && !is_eliminated) // Count wrong answers
-        else if (!is_correct)
-        {
-            bonus_points += 10;
-            printf("Player %d answered wrong. Adding 10 bonus points.\n", player_id);
+            // Transfer points to the main player
+            total_transferred_points += player_score;
+            printf("Player %d answered wrong. Transferring %d points to main player.\n", player_id, player_score);
+
+            // Reset the player's points to 0
+            cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(0));
+
+            // Mark the player as eliminated
+            cJSON_ReplaceItemInObject(player, "eliminated", cJSON_CreateBool(true));
         }
     }
 
@@ -615,17 +635,14 @@ void update_main_player_score()
         cJSON *player = cJSON_GetArrayItem(players, i);
         int player_id = cJSON_GetObjectItem(player, "player_id")->valueint;
 
-        // Update score for main player
         if (player_id == main_player_id)
         {
-            int score = cJSON_GetObjectItem(player, "score")->valueint;
-            cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(score + bonus_points));
-            printf("Main player %d received bonus points: %d (Total score: %d)\n",
-                   main_player_id, bonus_points, score + bonus_points);
+            int new_score = main_player_score + total_transferred_points;
+            cJSON_ReplaceItemInObject(player, "score", cJSON_CreateNumber(new_score));
+            printf("Main player %d received %d points. Total score: %d\n",
+                   main_player_id, total_transferred_points, new_score);
+            break;
         }
-
-        // Reset answer_correct for all players
-        // cJSON_ReplaceItemInObject(player, "answer_correct", cJSON_CreateBool(false));
     }
 
     // Write updated JSON data back to file
