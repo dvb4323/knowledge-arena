@@ -9,7 +9,7 @@
 #include "cJSON.h"
 
 #define SERVER_IP "127.0.0.1"
-#define PORT 8081
+#define PORT 8080
 
 int player_id = -1;
 int waiting_for_answer = 0;
@@ -167,6 +167,7 @@ void process_server_message(char *buffer)
     {
         cJSON *status_item = cJSON_GetObjectItem(message, "status");
         cJSON *message_item = cJSON_GetObjectItem(message, "message");
+        cJSON *score_item = cJSON_GetObjectItem(message, "score");
 
         if (!status_item || !cJSON_IsString(status_item))
         {
@@ -181,6 +182,11 @@ void process_server_message(char *buffer)
         if (message_item && cJSON_IsString(message_item))
         {
             printf("%s\n", message_item->valuestring);
+        }
+
+        if (score_item && cJSON_IsNumber(score_item))
+        {
+            printf("Your current Score: %d\n", score_item->valueint);
         }
 
         if (strcmp(status, "success") == 0)
